@@ -1,0 +1,213 @@
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+type ReportConfig = { matrix?: { baselineScenarioVariant?: string } };
+
+type TrialResult = {
+  evalTrialId?: string;
+  status?: string;
+  error?: string;
+  timings?: { durationMs?: number; startedAt?: string; finishedAt?: string };
+  scoring?: {
+    acceptanceChecks?: Array<{ id?: string; exitCode?: number | null; timedOut?: boolean; weight?: number; stdout?: string; stderr?: string }>;
+    evaluatorAgent?: { status?: string; result?: { summary?: string; criteria?: Array<{ id?: string; score?: number; rationale?: string }> }; error?: string };
+  };
+  evalScore?: { value?: number; deterministic?: unknown; rubric?: unknown; formula?: string };
+  usage?: { agent?: Record<string, unknown> };
+  cost?: { agent?: Record<string, unknown>; evaluatorAgent?: Record<string, unknown> };
+  worktree?: { preserved?: boolean; worktreePath?: string | null; agentHomePath?: string | null };
+};
+
+type TrialIdentity = { agentId: string; taskId: string; scenarioVariantId: string; runIndex: number };
+
+type ReportTrial = {
+  evalTrialId: string;
+  agentId: string;
+  taskId: string;
+  scenarioVariantId: string;
+  runIndex: number;
+  status: string;
+  failure: string | null;
+  evalScore: TrialResult["evalScore"];
+  deterministicAcceptance: NonNullable<TrialResult["scoring"]>["acceptanceChecks"];
+  evaluatorAgentRationale: NonNullable<TrialResult["scoring"]>["evaluatorAgent"] | null;
+  usage: TrialResult["usage"];
+  cost: TrialResult["cost"];
+  timings: TrialResult["timings"];
+  preservedWorktreePath: string | null;
+  baselineDelta: BaselineDelta | null;
+};
+
+type BaselineDelta =
+  | { status: "baseline" }
+  | { status: "matched"; baselineEvalTrialId: string; evalScoreDelta: number | null }
+  | { status: "missing"; baselineScenarioVariant: string; expectedEvalTrialId: string };
+
+export async function generateReports(resultsRoot: string) {
+  const root = path.resolve(resultsRoot);
+  const trials = await readTrialResults(root);
+  const baselineScenarioVariant = await readBaselineScenarioVariant(root, trials.map((trial) => trial.evalTrialId));
+  const reportTrials = buildReportTrials(trials, baselineScenarioVariant);
+  const report = {
+    generatedFrom: root,
+    baselineScenarioVariant: baselineScenarioVariant ?? null,
+    summary: {
+      evalTrials: reportTrials.length,
+      successful: reportTrials.filter((trial) => trial.status === "success").length,
+      failed: reportTrials.filter((trial) => trial.status === "failed").length,
+    },
+    trials: reportTrials,
+  };
+  await writeFile(path.join(root, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  await writeFile(path.join(root, "report.md"), renderMarkdownReport(report), "utf8");
+  return report;
+}
+
+async function readTrialResults(resultsRoot: string) {
+  const entries = await readdir(resultsRoot, { withFileTypes: true });
+  const trials: Array<TrialResult & { evalTrialId: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const resultPath = path.join(resultsRoot, entry.name, "result.json");
+    const result = JSON.parse(await readFile(resultPath, "utf8")) as TrialResult;
+    const evalTrialId = result.evalTrialId ?? entry.name;
+    trials.push({ ...result, evalTrialId });
+  }
+  return trials.sort((left, right) => left.evalTrialId.localeCompare(right.evalTrialId));
+}
+
+async function readBaselineScenarioVariant(resultsRoot: string, evalTrialIds: string[]) {
+  for (const evalTrialId of evalTrialIds) {
+    try {
+      const config = JSON.parse(await readFile(path.join(resultsRoot, evalTrialId, "config.json"), "utf8")) as ReportConfig;
+      if (config.matrix?.baselineScenarioVariant) return config.matrix.baselineScenarioVariant;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+  }
+  return undefined;
+}
+
+function buildReportTrials(trials: Array<TrialResult & { evalTrialId: string }>, baselineScenarioVariant: string | undefined): ReportTrial[] {
+  const byId = new Map(trials.map((trial) => [trial.evalTrialId, trial]));
+  return trials.map((trial) => {
+    const identity = parseEvalTrialId(trial.evalTrialId);
+    const expectedBaselineId = baselineScenarioVariant && identity ? evalTrialId({ ...identity, scenarioVariantId: baselineScenarioVariant }) : undefined;
+    const baseline = expectedBaselineId ? byId.get(expectedBaselineId) : undefined;
+    return {
+      evalTrialId: trial.evalTrialId,
+      ...(identity ?? { agentId: "unknown", taskId: "unknown", scenarioVariantId: "unknown", runIndex: 0 }),
+      status: trial.status ?? "unknown",
+      failure: trial.error ?? evaluatorFailure(trial) ?? null,
+      evalScore: trial.evalScore,
+      deterministicAcceptance: trial.scoring?.acceptanceChecks ?? [],
+      evaluatorAgentRationale: trial.scoring?.evaluatorAgent ?? null,
+      usage: trial.usage,
+      cost: trial.cost,
+      timings: trial.timings,
+      preservedWorktreePath: trial.worktree?.preserved ? trial.worktree.worktreePath ?? null : null,
+      baselineDelta: baselineDelta(trial, baseline, baselineScenarioVariant, expectedBaselineId, identity),
+    };
+  });
+}
+
+function baselineDelta(
+  trial: TrialResult & { evalTrialId: string },
+  baseline: (TrialResult & { evalTrialId: string }) | undefined,
+  baselineScenarioVariant: string | undefined,
+  expectedBaselineId: string | undefined,
+  identity: TrialIdentity | null
+): BaselineDelta | null {
+  if (!baselineScenarioVariant || !expectedBaselineId || !identity) return null;
+  if (identity.scenarioVariantId === baselineScenarioVariant) return { status: "baseline" };
+  if (!baseline) return { status: "missing", baselineScenarioVariant, expectedEvalTrialId: expectedBaselineId };
+  return { status: "matched", baselineEvalTrialId: baseline.evalTrialId, evalScoreDelta: scoreDelta(trial.evalScore?.value, baseline.evalScore?.value) };
+}
+
+function scoreDelta(value: number | undefined, baseline: number | undefined) {
+  if (typeof value !== "number" || typeof baseline !== "number") return null;
+  return Math.round((value - baseline) * 1_000_000) / 1_000_000;
+}
+
+function evaluatorFailure(trial: TrialResult) {
+  return trial.scoring?.evaluatorAgent?.status === "failed" ? trial.scoring.evaluatorAgent.error : undefined;
+}
+
+function parseEvalTrialId(evalTrialId: string): TrialIdentity | null {
+  const parts = evalTrialId.split("__");
+  if (parts.length !== 4) return null;
+  const runIndex = Number(parts[3]);
+  if (!Number.isInteger(runIndex)) return null;
+  return { agentId: parts[0] ?? "", taskId: parts[1] ?? "", scenarioVariantId: parts[2] ?? "", runIndex };
+}
+
+function evalTrialId(identity: TrialIdentity) {
+  return `${identity.agentId}__${identity.taskId}__${identity.scenarioVariantId}__${identity.runIndex}`;
+}
+
+function renderMarkdownReport(report: { baselineScenarioVariant: string | null; summary: { evalTrials: number; successful: number; failed: number }; trials: ReportTrial[] }) {
+  const lines = [
+    "# Eval Report",
+    "",
+    `Eval trials: ${report.summary.evalTrials}`,
+    `Successful: ${report.summary.successful}`,
+    `Failed: ${report.summary.failed}`,
+    `Baseline scenario variant: ${report.baselineScenarioVariant ?? "not configured"}`,
+    "",
+    "| Eval Trial | Status | Eval Score | Baseline Delta | Input Tokens | Output Tokens | Estimated Cost | Duration Ms | Failure | Preserved Worktree |",
+    "| --- | --- | ---: | --- | ---: | ---: | --- | ---: | --- | --- |",
+    ...report.trials.map(renderTrialRow),
+    "",
+    "## Deterministic Acceptance Results",
+    "",
+    ...report.trials.flatMap(renderAcceptanceLines),
+    "",
+    "## Evaluator Agent Rationale",
+    "",
+    ...report.trials.map(renderEvaluatorLine),
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function renderTrialRow(trial: ReportTrial) {
+  return `| ${trial.evalTrialId} | ${trial.status} | ${formatNumber(trial.evalScore?.value)} | ${formatBaselineDelta(trial.baselineDelta)} | ${formatNumber(agentUsageNumber(trial, "inputTokens") + agentUsageNumber(trial, "cacheReadTokens") + agentUsageNumber(trial, "cacheWriteTokens"))} | ${formatNumber(agentUsageNumber(trial, "outputTokens"))} | ${formatCost(trial.cost?.agent)} | ${formatNumber(trial.timings?.durationMs)} | ${trial.failure ?? ""} | ${trial.preservedWorktreePath ?? ""} |`;
+}
+
+function renderAcceptanceLines(trial: ReportTrial) {
+  const checks = Array.isArray(trial.deterministicAcceptance) ? trial.deterministicAcceptance : [];
+  if (checks.length === 0) return [`- ${trial.evalTrialId}: no deterministic acceptance results`];
+  return checks.map((check) => `- ${trial.evalTrialId} ${check.id ?? "unknown"}: exit ${check.exitCode ?? "null"}, timed out ${check.timedOut === true ? "yes" : "no"}`);
+}
+
+function renderEvaluatorLine(trial: ReportTrial) {
+  const evaluator = trial.evaluatorAgentRationale;
+  if (!evaluator || typeof evaluator !== "object") return `- ${trial.evalTrialId}: no evaluator agent rationale`;
+  if ("result" in evaluator && evaluator.result?.summary) return `- ${trial.evalTrialId}: ${evaluator.result.summary}`;
+  if ("error" in evaluator && evaluator.error) return `- ${trial.evalTrialId}: evaluator agent failed: ${evaluator.error}`;
+  return `- ${trial.evalTrialId}: no evaluator agent rationale`;
+}
+
+function agentUsageNumber(trial: ReportTrial, key: string) {
+  const value = trial.usage?.agent?.[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function formatBaselineDelta(delta: BaselineDelta | null) {
+  if (!delta) return "";
+  if (delta.status === "baseline") return "baseline";
+  if (delta.status === "missing") return `missing baseline ${delta.expectedEvalTrialId}`;
+  if (delta.evalScoreDelta === null) return `unknown vs ${delta.baselineEvalTrialId}`;
+  return `${delta.evalScoreDelta >= 0 ? "+" : ""}${delta.evalScoreDelta} vs ${delta.baselineEvalTrialId}`;
+}
+
+function formatCost(cost: Record<string, unknown> | undefined) {
+  if (!cost) return "";
+  if (typeof cost.estimatedUsd === "number") return `$${cost.estimatedUsd.toFixed(6)}`;
+  if (cost.status === "unavailable") return "unavailable";
+  return "";
+}
+
+function formatNumber(value: number | undefined) {
+  return typeof value === "number" ? String(value) : "";
+}

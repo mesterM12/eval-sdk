@@ -1,0 +1,75 @@
+sandbox:
+  provider: docker
+
+agents:
+  - id: opencode-big-pickle
+    provider: opencode
+    model: opencode/big-pickle
+    env:
+      OPENCODE_API_KEY: env:OPENCODE_API_KEY
+
+evaluatorAgent:
+  id: opencode-evaluator
+  provider: opencode
+  model: opencode/big-pickle
+  prompt: prompts/evaluator.md
+  env:
+    OPENCODE_API_KEY: env:OPENCODE_API_KEY
+
+tasks:
+  - id: inventory-parser
+    prompt: prompts/inventory-parser.md
+    starter: starter
+    scoring:
+      deterministicWeight: 0.9
+      rubricWeight: 0.1
+    acceptanceMaterial:
+      hiddenDir: acceptance/hidden
+      checks:
+        - id: core-behavior
+          command: node acceptance/hidden/core.test.mjs
+          cwd: .
+          timeoutMs: 30000
+          weight: 1
+        - id: csv-edge-cases
+          command: node acceptance/hidden/csv-edge-cases.test.mjs
+          cwd: .
+          timeoutMs: 30000
+          weight: 2
+        - id: validation-behavior
+          command: node acceptance/hidden/validation.test.mjs
+          cwd: .
+          timeoutMs: 30000
+          weight: 1
+      rubrics:
+        - id: maintainability
+          path: rubrics/maintainability.md
+          weight: 1
+          scale:
+            min: 1
+            max: 5
+
+scenarioVariants:
+  - id: baseline
+    description: No extra OpenCode runtime config.
+  - id: test-skill
+    description: Adds a real OpenCode skill that exposes the inventory parser contract.
+    prompt: prompts/scenarios/test-skill.md
+    agentHomeOverlay: overlays/test-skill-home
+  - id: audit-plugin
+    description: Adds a real OpenCode plugin that blocks incomplete inventory parser edits with contract feedback.
+    prompt: prompts/scenarios/audit-plugin.md
+    agentHomeOverlay: overlays/audit-plugin-home
+
+matrix:
+  runIndexes: [1]
+  baselineScenarioVariant: baseline
+
+pricing:
+  - id: opencode-big-pickle-example-price
+    provider: opencode
+    model: opencode/big-pickle
+    inputPerMillion: 0.1
+    cacheReadPerMillion: 0.01
+    cacheWritePerMillion: 0.1
+    outputPerMillion: 0.5
