@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createEvalTrialId, parseEvalTrialId, type EvalTrialIdentity } from "./eval-trial-identity.js";
 
 type ReportConfig = { matrix?: { baselineScenarioVariant?: string } };
 
@@ -17,8 +18,6 @@ type TrialResult = {
   cost?: { agent?: Record<string, unknown>; evaluatorAgent?: Record<string, unknown> };
   worktree?: { preserved?: boolean; worktreePath?: string | null; agentHomePath?: string | null };
 };
-
-type TrialIdentity = { agentId: string; taskId: string; scenarioVariantId: string; runIndex: number };
 
 type ReportTrial = {
   evalTrialId: string;
@@ -92,14 +91,15 @@ async function readBaselineScenarioVariant(resultsRoot: string, evalTrialIds: st
 function buildReportTrials(trials: Array<TrialResult & { evalTrialId: string }>, baselineScenarioVariant: string | undefined): ReportTrial[] {
   const byId = new Map(trials.map((trial) => [trial.evalTrialId, trial]));
   return trials.map((trial) => {
-    const identity = parseEvalTrialId(trial.evalTrialId);
-    const expectedBaselineId = baselineScenarioVariant && identity ? evalTrialId({ ...identity, scenarioVariantId: baselineScenarioVariant }) : undefined;
+    const parsedIdentity = readEvalTrialIdentity(trial.evalTrialId);
+    const identity = parsedIdentity.identity;
+    const expectedBaselineId = baselineScenarioVariant && identity ? createEvalTrialId({ ...identity, scenarioVariantId: baselineScenarioVariant }) : undefined;
     const baseline = expectedBaselineId ? byId.get(expectedBaselineId) : undefined;
     return {
       evalTrialId: trial.evalTrialId,
       ...(identity ?? { agentId: "unknown", taskId: "unknown", scenarioVariantId: "unknown", runIndex: 0 }),
       status: trial.status ?? "unknown",
-      failure: trial.error ?? evaluatorFailure(trial) ?? null,
+      failure: trial.error ?? evaluatorFailure(trial) ?? parsedIdentity.error ?? null,
       evalScore: trial.evalScore,
       deterministicAcceptance: trial.scoring?.acceptanceChecks ?? [],
       evaluatorAgentRationale: trial.scoring?.evaluatorAgent ?? null,
@@ -117,7 +117,7 @@ function baselineDelta(
   baseline: (TrialResult & { evalTrialId: string }) | undefined,
   baselineScenarioVariant: string | undefined,
   expectedBaselineId: string | undefined,
-  identity: TrialIdentity | null
+  identity: EvalTrialIdentity | undefined
 ): BaselineDelta | null {
   if (!baselineScenarioVariant || !expectedBaselineId || !identity) return null;
   if (identity.scenarioVariantId === baselineScenarioVariant) return { status: "baseline" };
@@ -134,16 +134,12 @@ function evaluatorFailure(trial: TrialResult) {
   return trial.scoring?.evaluatorAgent?.status === "failed" ? trial.scoring.evaluatorAgent.error : undefined;
 }
 
-function parseEvalTrialId(evalTrialId: string): TrialIdentity | null {
-  const parts = evalTrialId.split("__");
-  if (parts.length !== 4) return null;
-  const runIndex = Number(parts[3]);
-  if (!Number.isInteger(runIndex)) return null;
-  return { agentId: parts[0] ?? "", taskId: parts[1] ?? "", scenarioVariantId: parts[2] ?? "", runIndex };
-}
-
-function evalTrialId(identity: TrialIdentity) {
-  return `${identity.agentId}__${identity.taskId}__${identity.scenarioVariantId}__${identity.runIndex}`;
+function readEvalTrialIdentity(evalTrialId: string): { identity?: EvalTrialIdentity; error?: string } {
+  try {
+    return { identity: parseEvalTrialId(evalTrialId) };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }
 
 function renderMarkdownReport(report: { baselineScenarioVariant: string | null; summary: { evalTrials: number; successful: number; failed: number }; trials: ReportTrial[] }) {

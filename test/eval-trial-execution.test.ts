@@ -510,6 +510,15 @@ console.error(` + "`stderr ${process.env.SECRET_TOKEN}`" + `);
       formula: "deterministicWeight * deterministicScore + rubricWeight * rubricScore; rubric contribution is not counted when deterministic checks fail",
     });
     expect(resultJson.cost.agent).toEqual({ status: "unavailable", reason: "matching pricing not configured", provider: "opencode", model: "unpriced-model" });
+    expect(resultJson.worktree.preserved).toBe(true);
+    await expect(readFile(path.join(resultJson.worktree.worktreePath, "acceptance", "hidden", "fail.mjs"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const reportJson = JSON.parse(await readFile(path.join(suiteRoot, "results", "deterministic-failure", "report.json"), "utf8"));
+    expect(reportJson.summary).toEqual({ evalTrials: 1, successful: 0, failed: 1 });
+    expect(reportJson.trials[0]).toMatchObject({
+      evalTrialId: "agent__task__baseline__1",
+      status: "failed",
+      preservedWorktreePath: resultJson.worktree.worktreePath,
+    });
   });
 
   it("fails run-id collisions instead of overwriting existing result directories", async () => {

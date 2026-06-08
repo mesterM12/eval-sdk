@@ -121,7 +121,7 @@ describe("complex integration — full lifecycle end-to-end", () => {
         return { stdout: "ok", commits: [{ sha: "abc" }], iterations: [{ usage: { inputTokens: 10, outputTokens: 3 } }] };
       },
       evaluatorAgentExecutor: async () => ({
-        stdout: JSON.stringify({ criteria: [{ id: "quality", score: 4, rationale: "Good." }], summary: "Passed." }),
+        stdout: JSON.stringify({ criteria: [], summary: "Passed." }),
       }),
     });
 
@@ -187,7 +187,7 @@ describe("complex integration — full lifecycle end-to-end", () => {
     expect(result.evalScore.value).toBe(0.6);
   });
 
-  it("handles evaluator agent edge cases: missing criteria, extra keys, empty summary", async () => {
+  it("records missing Evaluator Agent rubric criteria as scoring failures", async () => {
     const cwd = await makeTempDir();
     await writeFixtureFile(cwd, "prompts/task.md", "# Task\n");
     await writeFixtureFile(cwd, "starter/README.md", "starter\n");
@@ -228,11 +228,9 @@ describe("complex integration — full lifecycle end-to-end", () => {
       }),
     });
 
-    expect(results[0]?.status).toBe("success");
+    expect(results[0]?.status).toBe("failed");
     const result = JSON.parse(await readFile(path.join(cwd, "results", "evaluator-edge-cases", "agent__task__baseline__1", "result.json"), "utf8"));
-    expect(result.scoring.evaluatorAgent.result.criteria).toHaveLength(1);
-    const qualityScore = result.scoring.evaluatorAgent.result.criteria[0];
-    expect(qualityScore).toMatchObject({ id: "quality", score: 8, rationale: "Good structure." });
+    expect(result.scoring.evaluatorAgent).toEqual(expect.objectContaining({ status: "failed", error: expect.stringContaining("missing rubric criterion: style") }));
   });
 
   it("redacts overlapping secrets correctly (longer match first)", async () => {

@@ -1,3 +1,5 @@
+import { createEvalTrialId } from "./eval-trial-identity.js";
+
 export type MatrixItem = { id: string };
 
 export type EvalTrial = {
@@ -45,7 +47,7 @@ export function expandTrialMatrix(input: TrialMatrixInput): EvalTrial[] {
   }
 
   for (const selector of exclude) {
-    evalTrialsById.delete(evalTrialId(selector.agent, selector.task, selector.scenarioVariant, selector.runIndex));
+    evalTrialsById.delete(createEvalTrialId({ agentId: selector.agent, taskId: selector.task, scenarioVariantId: selector.scenarioVariant, runIndex: selector.runIndex }));
   }
   for (const selector of include) {
     addEvalTrial(evalTrialsById, selector.agent, selector.task, selector.scenarioVariant, selector.runIndex);
@@ -55,10 +57,6 @@ export function expandTrialMatrix(input: TrialMatrixInput): EvalTrial[] {
 }
 
 function addEvalTrial(evalTrialsById: Map<string, EvalTrial>, agentId: string, taskId: string, scenarioVariantId: string, runIndex: number) {
-  const id = evalTrialId(agentId, taskId, scenarioVariantId, runIndex);
+  const id = createEvalTrialId({ agentId, taskId, scenarioVariantId, runIndex });
   evalTrialsById.set(id, { id, agentId, taskId, scenarioVariantId, runIndex });
-}
-
-function evalTrialId(agentId: string, taskId: string, scenarioVariantId: string, runIndex: number) {
-  return `${agentId}__${taskId}__${scenarioVariantId}__${runIndex}`;
 }
