@@ -1,10 +1,12 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { redactText } from "./acceptance-material-sandbox.js";
 import { createSandcastleCodingAgentAdapter, type SandcastleExecutorInput, type SandcastleExecutorResult } from "./coding-agent-adapter.js";
+import { redactText, resolveEnv } from "./env-reference.js";
+import { evalTrialArtifactPath, writeEvalTrialArtifactManifest, writeEvalTrialArtifacts, writeFailedEvalTrialResult } from "./eval-trial-artifacts.js";
 import type { EvaluatorAgentExecutorInput, EvaluatorAgentExecutorResult } from "./evaluator-agent.js";
 import { finalizeEvalTrialWorktree, prepareEvalTrialWorktree } from "./eval-trial-worktree.js";
 import type { EvalSuiteConfig } from "./eval-suite-config.js";
+import { resolveSuitePath } from "./filesystem-safety.js";
 import { ensureGitWorkBaseline } from "./git-work.js";
 import { didPostTrialScoringFail, runPostTrialScoring } from "./post-trial-scoring.js";
 import { scoreEvalTrialFacts } from "./scoring.js";
@@ -37,7 +39,7 @@ export async function runEvalTrialLifecycle(input: {
 
   try {
     const prompt = await resolvePromptSnapshot(input.suiteRoot, task.prompt, scenarioVariant.prompt);
-    await writeFile(path.join(artifactRoot, "prompt.md"), prompt, "utf8");
+    await writeFile(evalTrialArtifactPath(artifactRoot, "prompt"), prompt, "utf8");
     prepared = await prepareEvalTrialWorktree({
       suiteRoot: input.suiteRoot,
       tempRoot: input.tempRoot,
@@ -45,7 +47,6 @@ export async function runEvalTrialLifecycle(input: {
       starterPath: requireString(task.starter, "task starter"),
       repoOverlayPath: scenarioVariant.repoOverlay,
       agentHomeOverlayPath: scenarioVariant.agentHomeOverlay,
-      hiddenAcceptancePath: task.acceptanceMaterial?.hiddenDir,
     });
 
     const sandcastle = await completeEvalTrialWithCodingAgent({
@@ -58,7 +59,7 @@ export async function runEvalTrialLifecycle(input: {
       sandcastleExecutor: input.sandcastleExecutor,
     });
     const finishedAt = new Date();
-    await writeFile(path.join(artifactRoot, "sandcastle.log"), sandcastle.logs ?? sandcastle.stdout ?? "", "utf8");
+    await writeFile(evalTrialArtifactPath(artifactRoot, "sandcastleLog"), sandcastle.logs ?? sandcastle.stdout ?? "", "utf8");
 
     const scoring = await runPostTrialScoring({
       suiteRoot: input.suiteRoot,
@@ -98,7 +99,7 @@ export async function runEvalTrialLifecycle(input: {
       },
       secretValues
     );
-    await writeTrialArtifacts(artifactRoot, {
+    await writeEvalTrialArtifacts(artifactRoot, {
       config: input.config,
       diff: sandcastle.diff ?? "",
       commits: sandcastle.commits ?? [],
@@ -109,7 +110,7 @@ export async function runEvalTrialLifecycle(input: {
       evaluatorRationale: persistedScoring.evaluatorAgent,
       result: resultJson,
     });
-    await writeArtifactManifest(artifactRoot);
+    await writeEvalTrialArtifactManifest(artifactRoot);
     return scoringFailed
       ? { evalTrialId: input.evalTrial.id, status, artifactRoot, error: "post-trial scoring failed" }
       : { evalTrialId: input.evalTrial.id, status, artifactRoot };
@@ -118,22 +119,14 @@ export async function runEvalTrialLifecycle(input: {
     const worktree = prepared ? await finalizeEvalTrialWorktree(prepared, { outcome: "failure" }) : { preserved: false, worktreePath: null, agentHomePath: null };
     const message = error instanceof Error ? error.message : String(error);
     const publicMessage = message.startsWith("acceptance check cwd must stay inside the eval trial scoring sandbox") ? "post-trial scoring failed" : message;
-    await writeFile(
-      path.join(artifactRoot, "result.json"),
-      JSON.stringify(
-        {
-          evalTrialId: input.evalTrial.id,
-          status: "failed",
-          error: publicMessage,
-          timings: timings(startedAt, finishedAt),
-          worktree,
-        },
-        null,
-        2
-      ),
-      "utf8"
-    );
-    await writeArtifactManifest(artifactRoot);
+    await writeFailedEvalTrialResult(artifactRoot, {
+      evalTrialId: input.evalTrial.id,
+      status: "failed",
+      error: publicMessage,
+      timings: timings(startedAt, finishedAt),
+      worktree,
+    });
+    await writeEvalTrialArtifactManifest(artifactRoot);
     return { evalTrialId: input.evalTrial.id, status: "failed", error: publicMessage, artifactRoot };
   }
 }
@@ -156,53 +149,12 @@ async function completeEvalTrialWithCodingAgent(input: {
     prompt: input.prompt,
     worktreePath: input.prepared.repoPath,
     agentHomePath: input.prepared.agentHomePath,
-    logPath: path.join(input.artifactRoot, "sandcastle.log"),
+    logPath: evalTrialArtifactPath(input.artifactRoot, "sandcastleLog"),
     env: resolveEnv(input.agent.env),
   } satisfies SandcastleExecutorInput;
   const gitBaseline = await ensureGitWorkBaseline({ repoPath: input.prepared.repoPath });
   if (input.sandcastleExecutor) return input.sandcastleExecutor(sandcastleInput);
   return createSandcastleCodingAgentAdapter().completeEvalTrial({ ...sandcastleInput, gitBaseline });
-}
-
-async function writeTrialArtifacts(
-  artifactRoot: string,
-  artifacts: {
-    config: unknown;
-    diff: string;
-    commits: unknown[];
-    timings: unknown;
-    usage: unknown;
-    cost: unknown;
-    acceptanceOutput: unknown;
-    evaluatorRationale: unknown;
-    result: unknown;
-  }
-) {
-  await writeJson(path.join(artifactRoot, "config.json"), artifacts.config);
-  await writeFile(path.join(artifactRoot, "diff.patch"), artifacts.diff, "utf8");
-  await writeJson(path.join(artifactRoot, "commits.json"), artifacts.commits);
-  await writeJson(path.join(artifactRoot, "timings.json"), artifacts.timings);
-  await writeJson(path.join(artifactRoot, "usage.json"), artifacts.usage);
-  await writeJson(path.join(artifactRoot, "cost.json"), artifacts.cost);
-  await writeJson(path.join(artifactRoot, "acceptance-output.json"), artifacts.acceptanceOutput);
-  await writeJson(path.join(artifactRoot, "evaluator-rationale.json"), artifacts.evaluatorRationale);
-  await writeJson(path.join(artifactRoot, "result.json"), artifacts.result);
-}
-
-async function writeArtifactManifest(artifactRoot: string) {
-  const files = (await readdir(artifactRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name)
-    .filter((name) => name !== "artifact-manifest.json");
-  await writeJson(path.join(artifactRoot, "artifact-manifest.json"), { files: [...files, "artifact-manifest.json"].sort() });
-}
-
-async function writeJson(filePath: string, value: unknown) {
-  await writeFile(filePath, JSON.stringify(value, null, 2), "utf8");
-}
-
-function resolveEnv(env: Record<string, string> | undefined) {
-  return Object.fromEntries(Object.entries(env ?? {}).map(([name, value]) => [name, value.startsWith("env:") ? process.env[value.slice("env:".length)] ?? "" : value]));
 }
 
 function redactSecrets<T>(value: T, secretValues: string[]): T {
@@ -225,15 +177,6 @@ function findById<T extends { id: string }>(items: T[], id: string, label: strin
 function requireString(value: string | undefined, label: string) {
   if (!value) throw new Error(`${label} is required`);
   return value;
-}
-
-function resolveSuitePath(suiteRoot: string, relativePath: string) {
-  const resolved = path.resolve(suiteRoot, relativePath);
-  const relative = path.relative(suiteRoot, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`eval trial path must stay inside the suite root: ${relativePath}`);
-  }
-  return resolved;
 }
 
 function timings(startedAt: Date, finishedAt: Date) {

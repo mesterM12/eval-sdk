@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { runEvaluatorAgent, type EvaluatorAgentExecutorInput } from "../src/evaluator-agent.js";
+import { createSandcastleEvaluatorAgentExecutor, runEvaluatorAgent, type EvaluatorAgentExecutorInput } from "../src/evaluator-agent.js";
 import type { AcceptanceCheckResult } from "../src/acceptance-material-sandbox.js";
 
 async function makeTempDir() {
@@ -193,5 +193,63 @@ describe("Evaluator Agent module", () => {
     });
 
     expect(result).toEqual(expect.objectContaining({ status: "success", stdout: '{"criteria":[],"summary":"[REDACTED]"}', stderr: "stderr [REDACTED]" }));
+  });
+
+  it("uses the shared Sandcastle runtime seam for evaluator execution", async () => {
+    const scoringContextPath = await makeTempDir();
+    const dockerCalls: unknown[] = [];
+    const runCalls: unknown[] = [];
+    const executor = createSandcastleEvaluatorAgentExecutor({
+      providers: { opencode: (model?: string, options?: { env?: Record<string, string> }) => ({ provider: "opencode", model, env: options?.env }) },
+      docker: (options: unknown) => {
+        dockerCalls.push(options);
+        return { sandbox: "docker" };
+      },
+      noSandbox: () => ({ sandbox: "local" }),
+      run: async (options: unknown) => {
+        runCalls.push(options);
+        return { stdout: "{}" };
+      },
+    });
+
+    await executor({
+      evalTrialId: "agent__task__baseline__1",
+      providerName: "opencode",
+      model: "judge-model",
+      prompt: "Judge this",
+      scoringContextPath,
+      sandboxProvider: "docker",
+      readOnly: true,
+      deterministicResults: [],
+      rubrics: [],
+      env: { API_KEY: "test" },
+    });
+
+    expect(dockerCalls).toEqual([{}]);
+    expect(runCalls).toEqual([
+      expect.objectContaining({
+        agent: { provider: "opencode", model: "judge-model", env: { API_KEY: "test" } },
+        sandbox: { sandbox: "docker" },
+        cwd: scoringContextPath,
+        prompt: "Judge this",
+        branchStrategy: { type: "head" },
+      }),
+    ]);
+  });
+
+  it("fails clearly for unsupported evaluator Sandcastle providers", async () => {
+    const executor = createSandcastleEvaluatorAgentExecutor({ providers: {}, docker: () => ({}), noSandbox: () => ({}), run: async () => ({}) });
+
+    await expect(executor({
+      evalTrialId: "agent__task__baseline__1",
+      providerName: "unknown",
+      prompt: "Judge this",
+      scoringContextPath: await makeTempDir(),
+      sandboxProvider: "docker",
+      readOnly: true,
+      deterministicResults: [],
+      rubrics: [],
+      env: {},
+    })).rejects.toThrow("evaluator agent provider must be a Sandcastle built-in provider: unknown");
   });
 });

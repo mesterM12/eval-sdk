@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadEvalSuiteConfig } from "../src/eval-suite-config.js";
+import { supportedSandcastleBuiltInProviders } from "../src/sandcastle-provider-registry.js";
 
 async function makeSuiteRoot() {
   return mkdtemp(path.join(tmpdir(), "coding-agent-eval-config-"));
@@ -119,6 +120,51 @@ matrix:
     const suite = await loadEvalSuiteConfig(path.join(suiteRoot, "eval-suite.yaml"));
 
     expect(suite.config.sandbox).toEqual({ provider: "local" });
+  });
+
+  it.each(supportedSandcastleBuiltInProviders)("accepts shared Sandcastle built-in provider %s", async (provider) => {
+    const suiteRoot = await makeSuiteRoot();
+    await writeFixtureFile(suiteRoot, "prompts/task.md", "# Task\n");
+    await writeFixtureFile(suiteRoot, "starter/README.md", "# Starter\n");
+    await writeFixtureFile(suiteRoot, "acceptance/hidden/smoke.test.js", "console.log('ok')\n");
+    await writeFixtureFile(suiteRoot, "rubrics/maintainability.md", "# Maintainability\n");
+    await writeFixtureFile(
+      suiteRoot,
+      "eval-suite.yaml",
+      `sandbox:
+  provider: docker
+agents:
+  - id: agent
+    provider: ${provider}
+evaluatorAgent:
+  id: evaluator
+  provider: ${provider}
+tasks:
+  - id: hello
+    prompt: prompts/task.md
+    starter: starter
+    scoring:
+      deterministicWeight: 1
+      rubricWeight: 0
+    acceptanceMaterial:
+      hiddenDir: acceptance/hidden
+      checks:
+        - id: smoke
+          command: npm test
+      rubrics:
+        - id: maintainability
+          path: rubrics/maintainability.md
+scenarioVariants:
+  - id: baseline
+matrix:
+  runIndexes: [1]
+`
+    );
+
+    const suite = await loadEvalSuiteConfig(path.join(suiteRoot, "eval-suite.yaml"));
+
+    expect(suite.config.agents[0]?.provider).toBe(provider);
+    expect(suite.config.evaluatorAgent.provider).toBe(provider);
   });
 
   it("reports config module errors for unsafe paths, selectors, pricing, weights, providers, env refs, duplicates, and Acceptance Material refs", async () => {

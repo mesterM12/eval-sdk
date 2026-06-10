@@ -1,11 +1,10 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { claudeCode, codex, copilot, cursor, opencode, pi, run } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
-import { redactText, type AcceptanceCheckResult } from "./acceptance-material-sandbox.js";
-import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
+import type { AcceptanceCheckResult } from "./acceptance-material-sandbox.js";
+import { redactText, resolveEnv } from "./env-reference.js";
 import type { EvalSuiteConfig } from "./eval-suite-config.js";
+import { listVisibleFiles, normalizeRelativePath, resolveSuitePath } from "./filesystem-safety.js";
+import { runSandcastleBuiltIn, sandcastleRuntime, type EvalSandboxProvider, type SandcastleRuntime } from "./sandcastle-provider-registry.js";
 
 type RubricConfig = EvalSuiteConfig["tasks"][number]["acceptanceMaterial"]["rubrics"][number];
 
@@ -83,17 +82,18 @@ export async function runEvaluatorAgent(input: {
 
 export function createSandcastleEvaluatorAgentExecutor(runtime: SandcastleRuntime = sandcastleRuntime): (input: EvaluatorAgentExecutorInput) => Promise<EvaluatorAgentExecutorResult> {
   return async (input) => {
-    const providerFactory = runtime.providers[input.providerName];
-    if (!providerFactory) throw new Error(`evaluator agent provider must be a Sandcastle built-in provider: ${input.providerName}`);
     const logPath = path.join(path.dirname(input.scoringContextPath), `${input.evalTrialId}-evaluator-sandcastle.log`);
-    const result = await runtime.run({
-      agent: providerFactory(input.model, { env: input.env }),
-      sandbox: input.sandboxProvider === "local" ? runtime.noSandbox() : runtime.docker({}),
+    const result = await runSandcastleBuiltIn({
+      providerName: input.providerName,
+      model: input.model,
+      env: input.env,
+      sandboxProvider: input.sandboxProvider,
+      execution: { type: "evaluator-agent" },
       cwd: input.scoringContextPath,
       prompt: input.prompt,
-      logging: { type: "file", path: logPath },
-      branchStrategy: { type: "head" },
-    });
+      logPath,
+      providerLabel: "evaluator agent provider",
+    }, runtime);
     return {
       stdout: typeof result.stdout === "string" ? result.stdout : "",
     };
@@ -167,8 +167,8 @@ function validateCriteria(criteria: EvaluatorAgentJson["criteria"], rubrics: Rub
 
 async function snapshotScoringContext(scoringRepoPath: string) {
   const snapshot = new Map<string, string>();
-  for (const file of await listFiles(scoringRepoPath)) {
-    const normalizedFile = normalizeRelative(file);
+  for (const file of await listVisibleFiles(scoringRepoPath)) {
+    const normalizedFile = normalizeRelativePath(file);
     snapshot.set(normalizedFile, await readFile(path.join(scoringRepoPath, normalizedFile), "utf8"));
   }
   return snapshot;
@@ -186,18 +186,6 @@ async function assertScoringContextUnchanged(scoringRepoPath: string, before: Ma
       throw new Error("evaluator agent modified read-only scoring context");
     }
   }
-}
-
-async function listFiles(root: string, relativeDir = ""): Promise<string[]> {
-  const entries = await readdir(path.join(root, relativeDir), { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    if (entry.name === ".git") continue;
-    const relativePath = path.join(relativeDir, entry.name);
-    if (entry.isDirectory()) files.push(...(await listFiles(root, relativePath)));
-    else if (entry.isFile()) files.push(relativePath);
-  }
-  return files;
 }
 
 function extractJsonObject(stdout: string) {
@@ -230,45 +218,7 @@ function extractJsonObject(stdout: string) {
   return trimmed;
 }
 
-function resolveEnv(env: Record<string, string> | undefined) {
-  return Object.fromEntries(Object.entries(env ?? {}).map(([name, value]) => [name, value.startsWith("env:") ? process.env[value.slice("env:".length)] ?? "" : value]));
-}
-
-function normalizeRelative(relativePath: string) {
-  return relativePath.split(path.sep).join("/").replace(/^\.\//, "");
-}
-
 function requireString(value: string | undefined, label: string) {
   if (!value) throw new Error(`${label} is required`);
   return value;
 }
-
-function resolveSuitePath(suiteRoot: string, relativePath: string) {
-  const resolved = path.resolve(suiteRoot, relativePath);
-  const relative = path.relative(suiteRoot, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`eval trial path must stay inside the suite root: ${relativePath}`);
-  }
-  return resolved;
-}
-
-type SandcastleRuntime = {
-  run: (options: unknown) => Promise<Record<string, unknown>>;
-  docker: (options: unknown) => unknown;
-  noSandbox: (options?: unknown) => unknown;
-  providers: Record<string, (model?: string, options?: { env?: Record<string, string> }) => unknown>;
-};
-
-const sandcastleRuntime: SandcastleRuntime = {
-  run: run as unknown as SandcastleRuntime["run"],
-  docker: docker as SandcastleRuntime["docker"],
-  noSandbox: noSandbox as SandcastleRuntime["noSandbox"],
-  providers: {
-    "claude-code": claudeCode as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-    codex: codex as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-    copilot: copilot as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-    cursor: cursor as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-    opencode: opencode as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-    pi: pi as (model?: string, options?: { env?: Record<string, string> }) => unknown,
-  },
-};

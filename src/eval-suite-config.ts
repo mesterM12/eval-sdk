@@ -1,7 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
+import { envReferenceValidationError } from "./env-reference.js";
+import { isSafeRelativePath, resolveSuitePath } from "./filesystem-safety.js";
+import { isEvalSandboxProvider, isSandcastleBuiltInProvider, type EvalSandboxProvider } from "./sandcastle-provider-registry.js";
 
 export type MatrixSelector = { agent: string; task: string; scenarioVariant: string; runIndex: number };
 
@@ -71,9 +73,6 @@ type RawMatrixSelector = { agent?: string; task?: string; scenarioVariant?: stri
 type RawAcceptanceCheckConfig = { id?: string; command?: string; cwd?: string; timeoutMs?: number; weight?: number; env?: Record<string, string>; artifacts?: string[] };
 type RawRubricConfig = { id?: string; path?: string; weight?: number; scale?: { min?: number; max?: number } };
 
-const SANDCASTLE_BUILT_IN_PROVIDERS = new Set(["claude-code", "pi", "codex", "opencode", "cursor", "copilot"]);
-const SANDBOX_PROVIDERS = new Set(["docker", "local"]);
-
 export async function loadEvalSuiteConfig(configPath: string, options: { cwd?: string } = {}): Promise<LoadedEvalSuiteConfig> {
   const absoluteConfigPath = path.resolve(options.cwd ?? process.cwd(), configPath);
   const suiteRoot = path.dirname(absoluteConfigPath);
@@ -109,7 +108,7 @@ async function validateRawEvalSuiteConfig(config: RawEvalSuiteConfig, suiteRoot:
     return ["config must be a YAML object"];
   }
 
-  if (!config.sandbox?.provider || !SANDBOX_PROVIDERS.has(config.sandbox.provider)) {
+  if (!isEvalSandboxProvider(config.sandbox?.provider)) {
     errors.push("sandbox.provider must be docker or local");
   }
 
@@ -184,7 +183,7 @@ async function validateRawEvalSuiteConfig(config: RawEvalSuiteConfig, suiteRoot:
           const checkLabel = `${taskLabel} check ${check?.id ?? ""}`.trim();
           if (!check?.id) errors.push(`${taskLabel} acceptance material checks require an id`);
           if (!check?.command) errors.push(`${checkLabel} command is required`);
-          if (check?.cwd !== undefined && !isRelativeSafePath(check.cwd)) errors.push(`${checkLabel} cwd must be relative`);
+          if (check?.cwd !== undefined && !isSafeRelativePath(check.cwd)) errors.push(`${checkLabel} cwd must be relative`);
           if (check?.timeoutMs !== undefined && (!Number.isInteger(check.timeoutMs) || check.timeoutMs <= 0)) {
             errors.push(`${checkLabel} timeoutMs must be a positive integer`);
           }
@@ -192,7 +191,7 @@ async function validateRawEvalSuiteConfig(config: RawEvalSuiteConfig, suiteRoot:
             errors.push(`${checkLabel} weight must be a positive number`);
           }
           if (check?.artifacts !== undefined) {
-            const validArtifacts = Array.isArray(check.artifacts) && check.artifacts.every((artifact) => typeof artifact === "string" && isRelativeSafePath(artifact));
+            const validArtifacts = Array.isArray(check.artifacts) && check.artifacts.every((artifact) => typeof artifact === "string" && isSafeRelativePath(artifact));
             if (!validArtifacts) errors.push(`${checkLabel} artifacts must contain non-empty relative glob strings`);
           }
           checkEnvRefs(check?.env, checkLabel, errors);
@@ -364,20 +363,16 @@ function ids(items: Array<{ id?: string }> | undefined) {
   return new Set((items ?? []).map((item) => item.id).filter((id): id is string => typeof id === "string" && id.length > 0));
 }
 
-function isRelativeSafePath(value: string) {
-  return value.length > 0 && !path.isAbsolute(value) && !value.split(/[\\/]+/).includes("..");
-}
-
 async function checkPath(root: string, relativePath: string | undefined, label: string, errors: string[]) {
   if (!relativePath) {
     errors.push(`${label} is required`);
     return;
   }
-  if (!isRelativeSafePath(relativePath)) {
+  if (!isSafeRelativePath(relativePath)) {
     errors.push(`${label} must be a relative path`);
     return;
   }
-  if (!(await exists(path.resolve(root, relativePath)))) {
+  if (!(await exists(resolveSuitePath(root, relativePath)))) {
     errors.push(`${label} does not exist: ${relativePath}`);
   }
 }
@@ -392,9 +387,8 @@ async function checkMarkdownPath(root: string, relativePath: string | undefined,
 function checkEnvRefs(env: Record<string, string> | undefined, label: string, errors: string[]) {
   if (!env) return;
   for (const [name, value] of Object.entries(env)) {
-    if (typeof value !== "string" || !/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-      errors.push(`${label} env ${name} must be an env var reference like env:API_KEY`);
-    }
+    const error = envReferenceValidationError(value, label, name);
+    if (error) errors.push(error);
   }
 }
 
@@ -403,7 +397,7 @@ function checkProvider(provider: string | undefined, label: string, errors: stri
     errors.push(`${label} provider is required`);
     return;
   }
-  if (!SANDCASTLE_BUILT_IN_PROVIDERS.has(provider)) {
+  if (!isSandcastleBuiltInProvider(provider)) {
     errors.push(`${label} provider must be a Sandcastle built-in provider`);
   }
 }

@@ -102,7 +102,6 @@ describe("eval trial worktree filesystem seam", () => {
       tempRoot: path.join(root, ".eval-agent"),
       evalTrialId: "claude__task__baseline__1",
       starterPath: "starter",
-      hiddenAcceptancePath: "acceptance/hidden",
     });
 
     await expect(exists(path.join(prepared.repoPath, "acceptance", "hidden", "smoke.test.js"))).resolves.toBe(false);

@@ -1,23 +1,11 @@
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { readEvalTrialArtifacts, type PersistedEvalTrialResult } from "./eval-trial-artifacts.js";
 import { createEvalTrialId, parseEvalTrialId, type EvalTrialIdentity } from "./eval-trial-identity.js";
 
 type ReportConfig = { matrix?: { baselineScenarioVariant?: string } };
 
-type TrialResult = {
-  evalTrialId?: string;
-  status?: string;
-  error?: string;
-  timings?: { durationMs?: number; startedAt?: string; finishedAt?: string };
-  scoring?: {
-    acceptanceChecks?: Array<{ id?: string; exitCode?: number | null; timedOut?: boolean; weight?: number; stdout?: string; stderr?: string }>;
-    evaluatorAgent?: { status?: string; result?: { summary?: string; criteria?: Array<{ id?: string; score?: number; rationale?: string }> }; error?: string };
-  };
-  evalScore?: { value?: number; deterministic?: unknown; rubric?: unknown; formula?: string };
-  usage?: { agent?: Record<string, unknown> };
-  cost?: { agent?: Record<string, unknown>; evaluatorAgent?: Record<string, unknown> };
-  worktree?: { preserved?: boolean; worktreePath?: string | null; agentHomePath?: string | null };
-};
+type TrialResult = PersistedEvalTrialResult;
 
 type ReportTrial = {
   evalTrialId: string;
@@ -45,7 +33,7 @@ type BaselineDelta =
 export async function generateReports(resultsRoot: string) {
   const root = path.resolve(resultsRoot);
   const trials = await readTrialResults(root);
-  const baselineScenarioVariant = await readBaselineScenarioVariant(root, trials.map((trial) => trial.evalTrialId));
+  const baselineScenarioVariant = readBaselineScenarioVariant(trials);
   const reportTrials = buildReportTrials(trials, baselineScenarioVariant);
   const report = {
     generatedFrom: root,
@@ -64,26 +52,20 @@ export async function generateReports(resultsRoot: string) {
 
 async function readTrialResults(resultsRoot: string) {
   const entries = await readdir(resultsRoot, { withFileTypes: true });
-  const trials: Array<TrialResult & { evalTrialId: string }> = [];
+  const trials: Array<TrialResult & { evalTrialId: string; config?: unknown }> = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const resultPath = path.join(resultsRoot, entry.name, "result.json");
-    const result = JSON.parse(await readFile(resultPath, "utf8")) as TrialResult;
+    const { result, config } = await readEvalTrialArtifacts(path.join(resultsRoot, entry.name));
     const evalTrialId = result.evalTrialId ?? entry.name;
-    trials.push({ ...result, evalTrialId });
+    trials.push({ ...result, evalTrialId, ...(config === undefined ? {} : { config }) });
   }
   return trials.sort((left, right) => left.evalTrialId.localeCompare(right.evalTrialId));
 }
 
-async function readBaselineScenarioVariant(resultsRoot: string, evalTrialIds: string[]) {
-  for (const evalTrialId of evalTrialIds) {
-    try {
-      const config = JSON.parse(await readFile(path.join(resultsRoot, evalTrialId, "config.json"), "utf8")) as ReportConfig;
-      if (config.matrix?.baselineScenarioVariant) return config.matrix.baselineScenarioVariant;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw error;
-    }
+function readBaselineScenarioVariant(trials: Array<{ config?: unknown }>) {
+  for (const trial of trials) {
+    const config = trial.config as ReportConfig | undefined;
+    if (config?.matrix?.baselineScenarioVariant) return config.matrix.baselineScenarioVariant;
   }
   return undefined;
 }

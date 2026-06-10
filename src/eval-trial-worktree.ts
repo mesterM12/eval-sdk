@@ -1,5 +1,6 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
+import { resolveSuitePath } from "./filesystem-safety.js";
 
 export type PrepareEvalTrialWorktreeInput = {
   suiteRoot: string;
@@ -8,7 +9,6 @@ export type PrepareEvalTrialWorktreeInput = {
   tempRoot?: string;
   repoOverlayPath?: string;
   agentHomeOverlayPath?: string;
-  hiddenAcceptancePath?: string;
 };
 
 export type PreparedEvalTrialWorktree = {
@@ -60,13 +60,4 @@ export async function finalizeEvalTrialWorktree(
 
 async function copyDirectory(source: string, destination: string) {
   await cp(source, destination, { recursive: true, force: true, errorOnExist: false });
-}
-
-function resolveSuitePath(suiteRoot: string, relativePath: string) {
-  const resolved = path.resolve(suiteRoot, relativePath);
-  const relative = path.relative(suiteRoot, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`eval trial path must stay inside the suite root: ${relativePath}`);
-  }
-  return resolved;
 }

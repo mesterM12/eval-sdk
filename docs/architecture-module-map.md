@@ -34,6 +34,38 @@ Leverage: A delimiter rule change is testable in one place and then flows throug
 
 Depth guidance: Call this module rather than rebuilding ids inline. Inline parsing is a shallow substitute that risks divergent Eval Trial identity behavior.
 
+## Eval Trial Artifacts
+
+Files: `src/eval-trial-artifacts.ts`, composed by `src/eval-trial-lifecycle.ts` and consumed by `src/report.ts`.
+
+Interface: `evalTrialArtifactFiles`, `evalTrialArtifactPath(artifactRoot, artifact)`, `writeEvalTrialArtifacts(artifactRoot, artifacts)`, `writeFailedEvalTrialResult(artifactRoot, result)`, `writeEvalTrialArtifactManifest(artifactRoot)`, and `readEvalTrialArtifacts(artifactRoot)`.
+
+Implementation: Owns stable artifact filenames, the persisted result JSON shape, per-artifact JSON and patch writing, manifest enumeration, optional config reading for older result directories, and result artifact reading for Reports.
+
+Domain rules owned: Eval Trial artifact compatibility, persisted result shape consumed by Reports, manifest contents, and shared artifact filenames for lifecycle writing and report regeneration.
+
+Locality: Artifact contract rules stay in one module instead of being split between Eval Trial lifecycle and Reports.
+
+Leverage: Lifecycle-written artifacts and fixture result directories can be tested through the same seam that Reports use, preserving report regeneration without rerunning Eval Trials, Acceptance Material, or Evaluator Agents.
+
+Depth guidance: Keep artifact filenames, persisted result shape, and manifest writing here. Do not let Reports hard-code lifecycle output paths, recompute Eval Scores, rerun Acceptance Material, invoke Evaluator Agents, or decide lifecycle status.
+
+## Env Reference
+
+Files: `src/env-reference.ts`, consumed by `src/eval-suite-config.ts`, `src/eval-trial-lifecycle.ts`, `src/acceptance-material-sandbox.ts`, and `src/evaluator-agent.ts`.
+
+Interface: `envReferenceValidationError(value, label, name)`, `resolveEnv(env)`, `collectEnvSecretValues(envBlocks)`, `describeEnvForPublicOutput(env)`, and `redactText(text, secretValues)`.
+
+Implementation: Validates `env:` references, resolves referenced process env values with existing missing-value behavior, collects secret values from the same reference syntax, renders env names for public artifacts, and redacts secret values from public text.
+
+Domain rules owned: Env reference syntax, coding agent env resolution, Acceptance Material env resolution, Evaluator Agent env resolution, secret collection, missing env fallback, public env display, and redaction.
+
+Locality: Env and secret rules stay in one module instead of being repeated in Eval Suite Config, Eval Trial lifecycle, Acceptance Material sandboxing, and Evaluator Agent handling.
+
+Leverage: Tests can prove valid env refs, invalid env refs, missing env values, secret collection, and redaction once, then consumer seams reuse the same behavior for Eval Trials and post-trial scoring.
+
+Depth guidance: Keep shared `env:` syntax, resolution, public display, and redaction rules here. Do not recreate prefix checks or `process.env` lookup logic in callers; callers should only decide which env blocks participate in their Eval Trial, Acceptance Material, or Evaluator Agent path.
+
 ## Acceptance Material Sandbox
 
 Files: `src/acceptance-material-sandbox.ts`, composed by `src/post-trial-scoring.ts`.
@@ -49,6 +81,22 @@ Locality: Hiddenness and redaction rules stay together instead of being spread a
 Leverage: Filesystem seam tests can prove hidden Acceptance Material is absent during Eval Trial execution and present only for post-trial scoring.
 
 Depth guidance: Preserve `docs/adr/0002-hidden-acceptance-runs-in-post-trial-scoring-sandbox.md`. Do not add hidden Acceptance Material paths to Eval Trial worktrees, prompt snapshots, logs, or trial artifacts.
+
+## Filesystem Safety
+
+Files: `src/filesystem-safety.ts`, consumed by `src/eval-suite-config.ts`, `src/eval-trial-worktree.ts`, `src/eval-trial-lifecycle.ts`, `src/acceptance-material-sandbox.ts`, and `src/evaluator-agent.ts`.
+
+Interface: `resolveSuitePath(suiteRoot, relativePath)`, `resolveScoringRootPath(scoringRoot, relativePath, label)`, `isSafeRelativePath(relativePath)`, `normalizeRelativePath(relativePath)`, and `listVisibleFiles(root)`.
+
+Implementation: Resolves suite-relative paths while rejecting escapes, resolves scoring-root paths for Acceptance Material checks, validates relative path strings, normalizes relative paths to slash-separated artifact keys, and recursively lists visible files while excluding `.git`.
+
+Domain rules owned: Suite-root containment for Eval Trial starter files, Scenario Variant overlays, prompts, and rubrics; scoring-root containment for Acceptance Material execution; visible file traversal for artifacts and Evaluator Agent snapshots; and relative path normalization for filesystem comparisons.
+
+Locality: Filesystem safety rules stay in one module instead of being repeated in Eval Suite config validation, Eval Trial worktree setup, prompt snapshotting, Acceptance Material sandboxing, and Evaluator Agent read-only checks.
+
+Leverage: A path containment or visibility rule change is testable at one seam and then flows through Eval Trial preparation, post-trial scoring, Evaluator Agent scoring context, and config reference validation.
+
+Depth guidance: Keep containment, visibility, and normalization rules here when they are shared across modules. Do not add shallow wrappers that only forward to `path.resolve`, `path.relative`, or `readdir`; callers should use this module when they need safety behavior, not generic filesystem access.
 
 ## Eval Score And Scoring
 
@@ -98,6 +146,22 @@ Leverage: Fixture-based adapter tests can verify provider mapping, sandbox selec
 
 Depth guidance: Preserve `docs/adr/0003-local-sandbox-for-login-authenticated-agents.md`. Do not add custom command adapters when Sandcastle already provides the sandbox provider needed by product scope.
 
+## Sandbox Provider And Sandcastle Provider Registry
+
+Files: `src/sandcastle-provider-registry.ts`, consumed by `src/eval-suite-config.ts`, `src/coding-agent-adapter.ts`, `src/evaluator-agent.ts`, and `src/post-trial-scoring.ts`.
+
+Interface: `supportedSandboxProviders`, `supportedSandcastleBuiltInProviders`, `isEvalSandboxProvider(provider)`, `isSandcastleBuiltInProvider(provider)`, `sandcastleRuntime`, `createSandboxForEvalTrial(input, runtime)`, `createSandboxForEvaluatorAgent(sandboxProvider, runtime)`, and `runSandcastleBuiltIn(input, runtime)`.
+
+Implementation: Validates `docker` and `local`, validates Sandcastle built-in provider ids, maps provider ids to Sandcastle factories, chooses Docker or local sandbox execution for coding agents and Evaluator Agents, and owns shared Sandcastle run intent such as provider env, cwd, prompt, logging, and head branch strategy.
+
+Domain rules owned: Sandbox Provider support, local login execution, Docker execution, Sandcastle built-in provider id validity, and common built-in execution shape.
+
+Locality: Provider support and common execution-shape changes should happen in one module instead of being repeated in config validation, coding-agent execution, and Evaluator Agent execution.
+
+Leverage: Config validation and both execution adapters can share the same provider facts and shared Sandcastle run intent while keeping their own prompt, result, artifact, and failure behavior.
+
+Depth guidance: Do not import Sandbox Provider types from the Coding Agent Adapter into unrelated modules. Keep local/Docker choice and shared Sandcastle built-in execution intent here; keep coding-agent result shaping and Evaluator Agent scoring behavior in their adapters.
+
 ## Git Work
 
 Files: `src/git-work.ts`, used by `src/coding-agent-adapter.ts` and `src/eval-trial-lifecycle.ts`.
@@ -114,18 +178,50 @@ Leverage: Temporary repo tests can verify baseline and diff behavior with no cod
 
 Depth guidance: Keep git work focused. Remote starter sources, host-only scoring, retries, and storage changes are future scope, not part of this module.
 
+## Eval Trial Worktree
+
+Files: `src/eval-trial-worktree.ts`, composed by `src/eval-trial-lifecycle.ts`.
+
+Interface: `prepareEvalTrialWorktree(input)` and `finalizeEvalTrialWorktree(prepared, result)`.
+
+Implementation: Creates an isolated Eval Trial repo and agent home, copies visible starter files, applies Scenario Variant repo overlays, stages agent-home overlays, removes successful worktrees, and preserves failed worktrees in result metadata.
+
+Domain rules owned: Eval Trial worktree isolation, visible starter material, Scenario Variant file overlays, agent runtime config overlays, successful cleanup, and failed Eval Trial preservation.
+
+Locality: Filesystem setup and cleanup rules stay out of Eval Trial lifecycle orchestration and coding-agent execution.
+
+Leverage: Tests can prove worktree isolation, overlay behavior, and preservation rules without running a coding agent or post-trial scoring.
+
+Depth guidance: Hidden Acceptance Material is not a worktree concern. Preserve `docs/adr/0002-hidden-acceptance-runs-in-post-trial-scoring-sandbox.md` by keeping hidden files in post-trial scoring modules only.
+
+## Reports
+
+Files: `src/report.ts`, consumed by `src/eval-trial-execution.ts` and `src/cli.ts`.
+
+Interface: `generateReports(resultsRoot)`.
+
+Implementation: Reads Eval Trial artifacts through `src/eval-trial-artifacts.ts`, parses Eval Trial identity, matches baseline Scenario Variant results, computes displayed Eval Score deltas from persisted Eval Scores, summarizes success and failure counts, and writes JSON plus Markdown reports.
+
+Domain rules owned: report artifact shape, baseline Scenario Variant comparison, Eval Trial identity display, Eval Score delta display, deterministic Acceptance Material output display, Evaluator Agent rationale display, usage display, cost display, and preserved worktree display.
+
+Locality: Report formatting and artifact reading stay together rather than leaking into Eval Trial execution or scoring modules.
+
+Leverage: Report tests can exercise baseline delta and rendering behavior from fixture artifacts without rerunning Eval Trials, Acceptance Material, Evaluator Agents, or scoring math.
+
+Depth guidance: Reports consume artifacts through the artifact module. They should not recompute Eval Scores, rerun Acceptance Material, invoke Evaluator Agents, mutate Eval Trial artifacts, or decide lifecycle status.
+
 ## Eval Trial Execution Orchestration
 
-Files: `src/eval-trial-execution.ts`, `src/eval-trial-lifecycle.ts`, and `src/post-trial-scoring.ts`.
+Files: `src/eval-trial-execution.ts`, `src/eval-trial-lifecycle.ts`, and `src/post-trial-scoring.ts`, composing `src/eval-trial-worktree.ts` and `src/report.ts`.
 
 Interface: `executeEvalTrials(input)`, `runEvalTrialLifecycle(input)`, `runPostTrialScoring(input)`, and `didPostTrialScoringFail(scoring)`.
 
 Implementation: Creates a results run directory, expands the Trial Matrix, schedules Eval Trials with optional fail-fast, prepares worktrees, snapshots prompts, invokes the coding agent adapter, runs post-trial scoring, computes Eval Score facts, writes stable artifacts, finalizes worktrees, and generates reports.
 
-Domain rules owned: Eval Trial lifecycle ordering, artifact compatibility, fail-fast behavior, success or failure shaping, report generation timing, and composition of the deep modules above.
+Domain rules owned: Eval Trial lifecycle ordering, artifact compatibility, fail-fast behavior, success or failure shaping, post-trial scoring timing, report generation timing, and composition of the deep modules above.
 
 Locality: Lifecycle order stays readable here while specialized rules stay in their owning modules.
 
 Leverage: High-level filesystem seam tests can prove the full Eval Trial path without duplicating config, scoring, git, adapter, or hidden Acceptance Material implementation details.
 
-Depth guidance: This module should orchestrate, not absorb. If a change adds pricing math, hidden Acceptance Material copying, Evaluator Agent JSON parsing, provider mapping, or git command details here, move it back to the owning module.
+Depth guidance: This module should orchestrate, not absorb. If a change adds pricing math, hidden Acceptance Material copying, Evaluator Agent JSON parsing, provider mapping, report formatting, worktree copying, or git command details here, move it back to the owning module.

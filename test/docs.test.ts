@@ -21,7 +21,10 @@ describe("architecture module map documentation", () => {
       "Eval Score And Scoring",
       "Evaluator Agent",
       "Coding Agent Adapter",
+      "Sandbox Provider And Sandcastle Provider Registry",
       "Git Work",
+      "Eval Trial Worktree",
+      "Reports",
       "Eval Trial Execution Orchestration",
     ]) {
       expect(doc).toContain(`## ${moduleName}`);
@@ -29,6 +32,8 @@ describe("architecture module map documentation", () => {
 
     expect(doc).toContain("docs/adr/0001-deterministic-tests-anchor-scoring.md");
     expect(doc).toContain("docs/adr/0002-hidden-acceptance-runs-in-post-trial-scoring-sandbox.md");
+    expect(doc).toContain("Hidden Acceptance Material is not a worktree concern");
+    expect(doc).toContain("Sandbox Provider support");
 
     for (const heading of doc.matchAll(/^## .+$/gm)) {
       const sectionStart = heading.index ?? 0;

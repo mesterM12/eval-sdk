@@ -89,6 +89,26 @@ console.error(` + "`stderr ${process.env.SECRET_TOKEN}`" + `);
     expect(await exists(path.join(completedRepoPath, "acceptance", "hidden", "check.mjs"))).toBe(false);
   });
 
+  it("collects only visible artifacts and normalizes artifact paths", async () => {
+    const suiteRoot = await makeTempDir();
+    const completedRepoPath = path.join(suiteRoot, "completed-repo");
+    const scoringRoot = path.join(suiteRoot, ".eval-agent", "scoring", "agent__task__baseline__1");
+    await writeFixtureFile(completedRepoPath, "reports/output.txt", "visible artifact\n");
+    await writeFixtureFile(completedRepoPath, ".git/config", "git metadata\n");
+    await writeFixtureFile(suiteRoot, "acceptance/hidden/check.mjs", "console.log('ok');\n");
+
+    const result = await runAcceptanceMaterialSandbox({
+      suiteRoot,
+      scoringRoot,
+      completedRepoPath,
+      hiddenDir: "acceptance/hidden",
+      checks: [{ id: "artifacts", command: "node acceptance/hidden/check.mjs", cwd: ".", timeoutMs: 5000, weight: 1, env: {}, artifacts: ["reports/*.txt", ".git/*"] }],
+      secretValues: [],
+    });
+
+    expect(result.acceptanceChecks[0]?.artifacts).toEqual([{ path: "reports/output.txt", contents: "visible artifact\n" }]);
+  });
+
   it("preserves deterministic check failures, timeout behavior, and safe cwd cleanup", async () => {
     const suiteRoot = await makeTempDir();
     const completedRepoPath = path.join(suiteRoot, "completed-repo");

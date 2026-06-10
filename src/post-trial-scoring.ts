@@ -1,7 +1,7 @@
 import { collectAcceptanceSecretValues, runAcceptanceMaterialSandbox, type AcceptanceCheckResult } from "./acceptance-material-sandbox.js";
-import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
 import { runEvaluatorAgent, type EvaluatorAgentExecutorInput, type EvaluatorAgentExecutorResult, type EvaluatorAgentScoringResult } from "./evaluator-agent.js";
 import type { EvalSuiteConfig } from "./eval-suite-config.js";
+import type { EvalSandboxProvider } from "./sandcastle-provider-registry.js";
 
 export type PostTrialScoringResult = {
   acceptanceChecks: AcceptanceCheckResult[];
