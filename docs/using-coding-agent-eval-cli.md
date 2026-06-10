@@ -2,15 +2,15 @@
 
 This guide documents the CLI workflow from installation through running a real eval suite with scenario variants, hidden acceptance material, skills, plugins, and reports.
 
-The CLI compares coding agents against repeatable software tasks. It expands an `eval-suite.yaml` into a trial matrix, creates one isolated git worktree per eval trial, runs a Sandcastle built-in coding agent in Docker, introduces hidden acceptance material only during post-trial scoring, optionally asks an evaluator agent to score rubrics, and writes JSON and Markdown reports.
+The CLI compares coding agents against repeatable software tasks. It expands an `eval-suite.yaml` into a trial matrix, creates one git worktree per eval trial, runs a Sandcastle built-in coding agent in Docker or locally, introduces hidden acceptance material only during post-trial scoring, optionally asks an evaluator agent to score rubrics, and writes JSON and Markdown reports.
 
 ## Prerequisites
 
 - Node.js 20 or newer.
-- Docker running locally.
+- Docker running locally when `sandbox.provider` is `docker`.
 - A Sandcastle Docker image for the starter project.
 - Provider credentials for the coding agent and evaluator agent.
-- The provider CLI installed in the Sandcastle Docker image, for example `opencode-ai` for OpenCode or `@anthropic-ai/claude-code` for Claude Code.
+- The provider CLI installed in the Sandcastle Docker image when `sandbox.provider` is `docker`, or installed on the host when `sandbox.provider` is `local`.
 
 Install and build the CLI:
 
@@ -85,7 +85,7 @@ The working example at `examples/opencode-skills-and-plugins` follows this layou
 
 ## Input Files
 
-`eval-suite.yaml` is the suite manifest. It defines the sandbox, agents, evaluator agent, tasks, scenario variants, trial matrix, optional pricing, and optional report prompt.
+`eval-suite.yaml` is the suite manifest. It defines the sandbox provider, agents, evaluator agent, tasks, scenario variants, trial matrix, optional pricing, and optional report prompt.
 
 Task prompts under `prompts/` are visible to the coding agent. A task prompt is the base instruction for the coding work.
 
@@ -97,7 +97,7 @@ The `starter/` directory is copied into every eval trial worktree. It should con
 
 `rubrics/` contains Markdown rubric docs for evaluator-agent scoring. Rubrics are not shown to the coding agent unless you separately include them in the visible prompt or overlays.
 
-`overlays/` contains scenario-specific files. `repoOverlay` files are copied into the eval trial repo before the agent runs. `agentHomeOverlay` files are copied into the isolated agent home mounted at `/home/agent` inside Docker.
+`overlays/` contains scenario-specific files. `repoOverlay` files are copied into the eval trial repo before the agent runs. `agentHomeOverlay` files are copied into the isolated agent home mounted at `/home/agent` inside Docker; local execution uses the host agent CLI and its normal host credential/config lookup instead.
 
 ## Config Reference
 
@@ -156,9 +156,9 @@ matrix:
   baselineScenarioVariant: baseline
 ```
 
-`sandbox.provider` must be `docker`.
+`sandbox.provider` must be `docker` or `local`. `docker` runs coding agents and evaluator agents in Sandcastle Docker containers with the prepared agent home mounted at `/home/agent`. `local` runs coding agents and evaluator agents on the host with Sandcastle `noSandbox()`, which lets locally authenticated Claude Code and OpenCode/OpenAI CLIs use their existing login state but does not provide container isolation.
 
-`agents` defines coding agents. Supported provider names are Sandcastle built-ins: `claude-code`, `pi`, `codex`, `opencode`, `cursor`, and `copilot`. `id` is used in eval trial ids. `model` is passed to the provider factory. `env` maps sandbox environment variable names to host environment variable references like `env:ANTHROPIC_API_KEY`.
+`agents` defines coding agents. Supported provider names are Sandcastle built-ins: `claude-code`, `pi`, `codex`, `opencode`, `cursor`, and `copilot`. `id` is used in eval trial ids. `model` is passed to the provider factory. `env` maps sandbox environment variable names to host environment variable references like `env:ANTHROPIC_API_KEY`; omit API-key env entries when using a locally logged-in CLI in `local` mode.
 
 `evaluatorAgent` defines the post-trial evaluator agent. It uses the same provider names as coding agents. Its prompt is prepended to an auto-generated scoring prompt that includes deterministic results and rubric docs. The evaluator must return JSON; malformed evaluator output fails the eval trial.
 
@@ -188,7 +188,7 @@ For each expanded eval trial, the CLI:
 4. Copies `repoOverlay` into the repo worktree if configured.
 5. Copies `agentHomeOverlay` into the isolated agent home if configured.
 6. Initializes a git baseline commit if the starter is not already a git repo.
-7. Runs the Sandcastle built-in provider in Docker with the isolated agent home mounted at `/home/agent`.
+7. Runs the Sandcastle built-in provider through the configured sandbox provider. Docker mode mounts the isolated agent home at `/home/agent`; local mode runs on the host with local CLI credentials/config.
 8. Captures Sandcastle logs, commits, and git diff.
 9. Copies the completed repo into a scoring sandbox.
 10. Copies hidden acceptance material into the scoring sandbox.
@@ -517,17 +517,17 @@ node ../dist/cli.js validate -c eval-suite.yaml
 
 `results run directory already exists`: choose a new `--results-dir`. Result directories are immutable by design.
 
-`sandbox.provider must be docker`: only Docker is supported by this CLI release.
+`sandbox.provider must be docker or local`: use `docker` for isolated container execution, or `local` for host execution with local CLI login state.
 
 `agent provider must be a Sandcastle built-in provider`: use `claude-code`, `pi`, `codex`, `opencode`, `cursor`, or `copilot`.
 
 Docker errors during `run`: verify Docker is running and rebuild `sandcastle:repo` from the starter directory.
 
-Provider command not found: install the provider CLI in `starter/.sandcastle/Dockerfile` and rebuild the image.
+Provider command not found: in Docker mode, install the provider CLI in `starter/.sandcastle/Dockerfile` and rebuild the image; in local mode, install the provider CLI on the host.
 
-OpenCode auth errors: export `OPENCODE_API_KEY` or use local OpenCode auth supported by your environment.
+OpenCode auth errors: in Docker mode, export `OPENCODE_API_KEY`; in local mode, verify the host OpenCode CLI is logged in to OpenAI.
 
-Claude Code auth errors: export `ANTHROPIC_API_KEY`, verify the Docker image has the `claude` CLI, and confirm the configured model name is accepted by Claude Code.
+Claude Code auth errors: in Docker mode, export `ANTHROPIC_API_KEY` and verify the Docker image has the `claude` CLI; in local mode, verify the host Claude Code CLI is logged in and the configured model name is accepted.
 
 Hidden tests unexpectedly visible to the coding agent: ensure hidden files are only under `acceptanceMaterial.hiddenDir`, not inside `starter`, `repoOverlay`, or visible prompts.
 

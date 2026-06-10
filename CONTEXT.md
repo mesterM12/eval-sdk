@@ -27,3 +27,7 @@ _Avoid_: Judge, grader, reviewer
 **Eval Score**:
 The final weighted result for an eval trial, combining deterministic acceptance results with evaluator-agent rubric scores.
 _Avoid_: Grade, rating
+
+**Sandbox Provider**:
+The execution boundary used for coding agents and evaluator agents during an eval trial. Docker preserves container isolation; local execution trades that isolation for access to locally authenticated agent CLIs.
+_Avoid_: Runtime mode, auth mode

@@ -1,4 +1,5 @@
 import { collectAcceptanceSecretValues, runAcceptanceMaterialSandbox, type AcceptanceCheckResult } from "./acceptance-material-sandbox.js";
+import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
 import { runEvaluatorAgent, type EvaluatorAgentExecutorInput, type EvaluatorAgentExecutorResult, type EvaluatorAgentScoringResult } from "./evaluator-agent.js";
 import type { EvalSuiteConfig } from "./eval-suite-config.js";
 
@@ -16,6 +17,7 @@ export async function runPostTrialScoring(input: {
   agent: EvalSuiteConfig["agents"][number];
   task: EvalSuiteConfig["tasks"][number];
   evaluatorAgent: EvalSuiteConfig["evaluatorAgent"];
+  sandboxProvider: EvalSandboxProvider;
   evaluatorAgentExecutor?: (input: EvaluatorAgentExecutorInput) => Promise<EvaluatorAgentExecutorResult>;
 }): Promise<PostTrialScoringResult> {
   const secretValues = collectAcceptanceSecretValues(input.task.acceptanceMaterial?.checks ?? [], input.evaluatorAgent, input.agent);
@@ -34,6 +36,7 @@ export async function runPostTrialScoring(input: {
         deterministicResults: acceptanceChecks,
         rubrics: input.task.acceptanceMaterial?.rubrics ?? [],
         evaluatorAgent: input.evaluatorAgent,
+        sandboxProvider: input.sandboxProvider,
         executor: input.evaluatorAgentExecutor,
         secretValues,
       }),

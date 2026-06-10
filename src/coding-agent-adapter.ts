@@ -1,13 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { claudeCode, codex, copilot, cursor, opencode, pi, run } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { collectGitWorkDiff, ensureGitWorkBaseline, type GitWorkBaseline } from "./git-work.js";
+
+export type EvalSandboxProvider = "docker" | "local";
 
 export type SandcastleExecutorInput = {
   evalTrialId: string;
   providerName: string;
   model?: string;
-  sandboxProvider: "docker";
+  sandboxProvider: EvalSandboxProvider;
   branchStrategy: "head";
   prompt: string;
   worktreePath: string;
@@ -26,7 +29,7 @@ export type SandcastleExecutorResult = {
   iterations?: Array<Record<string, unknown>>;
 };
 
-export type CodingAgentAdapterInput = Omit<SandcastleExecutorInput, "sandboxProvider" | "branchStrategy"> & {
+export type CodingAgentAdapterInput = Omit<SandcastleExecutorInput, "branchStrategy"> & {
   gitBaseline: GitWorkBaseline;
 };
 
@@ -37,12 +40,14 @@ export type CodingAgentAdapter = {
 export type SandcastleRuntime = {
   run: (options: unknown) => Promise<Record<string, unknown>>;
   docker: (options: unknown) => unknown;
+  noSandbox: (options?: unknown) => unknown;
   providers: Record<string, (model?: string, options?: { env?: Record<string, string> }) => unknown>;
 };
 
 const sandcastleRuntime: SandcastleRuntime = {
   run: run as unknown as SandcastleRuntime["run"],
   docker: docker as SandcastleRuntime["docker"],
+  noSandbox: noSandbox as SandcastleRuntime["noSandbox"],
   providers: {
     "claude-code": claudeCode as (model?: string, options?: { env?: Record<string, string> }) => unknown,
     codex: codex as (model?: string, options?: { env?: Record<string, string> }) => unknown,
@@ -62,7 +67,7 @@ export function createSandcastleCodingAgentAdapter(runtime: SandcastleRuntime = 
       }
       const runResult = await runtime.run({
         agent: providerFactory(input.model, { env: input.env }),
-        sandbox: runtime.docker({ mounts: [{ hostPath: input.agentHomePath, sandboxPath: "/home/agent" }] }),
+        sandbox: createSandbox(input, runtime),
         cwd: input.worktreePath,
         prompt: input.prompt,
         logging: { type: "file", path: input.logPath },
@@ -86,6 +91,11 @@ export function createSandcastleCodingAgentAdapter(runtime: SandcastleRuntime = 
       };
     },
   };
+}
+
+function createSandbox(input: CodingAgentAdapterInput, runtime: SandcastleRuntime) {
+  if (input.sandboxProvider === "local") return runtime.noSandbox();
+  return runtime.docker({ mounts: [{ hostPath: input.agentHomePath, sandboxPath: "/home/agent" }] });
 }
 
 export function createSandcastleBuiltInExecutor(runtime: SandcastleRuntime = sandcastleRuntime): (input: SandcastleExecutorInput) => Promise<SandcastleExecutorResult> {

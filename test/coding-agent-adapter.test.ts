@@ -34,6 +34,7 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
         dockerCalls.push(options);
         return { sandbox: "docker" };
       },
+      noSandbox: () => ({ sandbox: "local" }),
       run: async (options: unknown) => {
         runCalls.push(options);
         await writeFixtureFile(worktreePath, "README.md", "after\n");
@@ -56,6 +57,7 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
       worktreePath,
       agentHomePath,
       logPath,
+      sandboxProvider: "docker",
       env: { API_KEY: "test" },
       gitBaseline: baseline,
     });
@@ -83,7 +85,7 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
   });
 
   it("fails clearly for unsupported Sandcastle providers", async () => {
-    const adapter = createSandcastleCodingAgentAdapter({ providers: {}, docker: () => ({}), run: async () => ({}) });
+    const adapter = createSandcastleCodingAgentAdapter({ providers: {}, docker: () => ({}), noSandbox: () => ({}), run: async () => ({}) });
 
     await expect(adapter.completeEvalTrial({
       evalTrialId: "agent__task__baseline__1",
@@ -92,6 +94,7 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
       worktreePath: await makeTempDir(),
       agentHomePath: await makeTempDir(),
       logPath: path.join(await makeTempDir(), "sandcastle.log"),
+      sandboxProvider: "docker",
       env: {},
       gitBaseline: { baseSha: "HEAD" },
     })).rejects.toThrow("agent provider must be a Sandcastle built-in provider: unknown");
@@ -104,6 +107,7 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
     const adapter = createSandcastleCodingAgentAdapter({
       providers: { opencode: () => ({}) },
       docker: () => ({}),
+      noSandbox: () => ({}),
       run: async () => ({ stdout: "stdout fallback", logFilePath: path.join(worktreePath, "missing.log") }),
     });
 
@@ -114,11 +118,54 @@ describe("coding agent adapter fake Sandcastle runtime seam", () => {
       worktreePath,
       agentHomePath: await makeTempDir(),
       logPath: path.join(await makeTempDir(), "sandcastle.log"),
+      sandboxProvider: "docker",
       env: {},
       gitBaseline: baseline,
     });
 
     expect(completed.logs).toBeUndefined();
     expect(completed.stdout).toBe("stdout fallback");
+  });
+
+  it("uses no-sandbox instead of Docker for local eval trials", async () => {
+    const worktreePath = await makeTempDir();
+    await writeFixtureFile(worktreePath, "README.md", "before\n");
+    const baseline = await ensureGitWorkBaseline({ repoPath: worktreePath });
+    const dockerCalls: unknown[] = [];
+    const noSandboxCalls: unknown[] = [];
+    const runCalls: unknown[] = [];
+    const adapter = createSandcastleCodingAgentAdapter({
+      providers: { "claude-code": (model?: string, options?: { env?: Record<string, string> }) => ({ provider: "claude-code", model, env: options?.env }) },
+      docker: (options: unknown) => {
+        dockerCalls.push(options);
+        return { sandbox: "docker" };
+      },
+      noSandbox: (options?: unknown) => {
+        noSandboxCalls.push(options);
+        return { sandbox: "local" };
+      },
+      run: async (options: unknown) => {
+        runCalls.push(options);
+        await writeFixtureFile(worktreePath, "README.md", "after\n");
+        return { stdout: "stdout" };
+      },
+    });
+
+    await adapter.completeEvalTrial({
+      evalTrialId: "claude__task__baseline__1",
+      providerName: "claude-code",
+      model: "claude-opus-4-7",
+      prompt: "# Task\n",
+      worktreePath,
+      agentHomePath: await makeTempDir(),
+      logPath: path.join(await makeTempDir(), "sandcastle.log"),
+      sandboxProvider: "local",
+      env: {},
+      gitBaseline: baseline,
+    });
+
+    expect(dockerCalls).toEqual([]);
+    expect(noSandboxCalls).toEqual([undefined]);
+    expect(runCalls).toEqual([expect.objectContaining({ sandbox: { sandbox: "local" }, cwd: worktreePath })]);
   });
 });

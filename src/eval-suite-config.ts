@@ -1,11 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
+import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
 
 export type MatrixSelector = { agent: string; task: string; scenarioVariant: string; runIndex: number };
 
 export type EvalSuiteConfig = {
-  sandbox: { provider: "docker" };
+  sandbox: { provider: EvalSandboxProvider };
   agents: Array<{ id: string; provider: string; model?: string; env?: Record<string, string> }>;
   evaluatorAgent: { id: string; provider: string; model?: string; prompt?: string; env?: Record<string, string> };
   tasks: Array<{
@@ -71,6 +72,7 @@ type RawAcceptanceCheckConfig = { id?: string; command?: string; cwd?: string; t
 type RawRubricConfig = { id?: string; path?: string; weight?: number; scale?: { min?: number; max?: number } };
 
 const SANDCASTLE_BUILT_IN_PROVIDERS = new Set(["claude-code", "pi", "codex", "opencode", "cursor", "copilot"]);
+const SANDBOX_PROVIDERS = new Set(["docker", "local"]);
 
 export async function loadEvalSuiteConfig(configPath: string, options: { cwd?: string } = {}): Promise<LoadedEvalSuiteConfig> {
   const absoluteConfigPath = path.resolve(options.cwd ?? process.cwd(), configPath);
@@ -107,8 +109,8 @@ async function validateRawEvalSuiteConfig(config: RawEvalSuiteConfig, suiteRoot:
     return ["config must be a YAML object"];
   }
 
-  if (config.sandbox?.provider !== "docker") {
-    errors.push("sandbox.provider must be docker");
+  if (!config.sandbox?.provider || !SANDBOX_PROVIDERS.has(config.sandbox.provider)) {
+    errors.push("sandbox.provider must be docker or local");
   }
 
   const hasAgents = requireNonEmptyArray(config.agents, "agents", errors);
@@ -253,7 +255,7 @@ async function validateRawEvalSuiteConfig(config: RawEvalSuiteConfig, suiteRoot:
 
 function normalizeEvalSuiteConfig(config: RawEvalSuiteConfig): EvalSuiteConfig {
   return {
-    sandbox: { provider: "docker" },
+    sandbox: { provider: config.sandbox?.provider as EvalSandboxProvider },
     agents: (config.agents ?? []).map((agent) => withoutUndefined({ id: agent.id, provider: agent.provider, model: agent.model, env: agent.env })),
     evaluatorAgent: withoutUndefined({
       id: config.evaluatorAgent?.id,

@@ -54,6 +54,7 @@ export async function runEvalTrialLifecycle(input: {
       prompt,
       prepared,
       artifactRoot,
+      sandboxProvider: input.config.sandbox.provider,
       sandcastleExecutor: input.sandcastleExecutor,
     });
     const finishedAt = new Date();
@@ -67,6 +68,7 @@ export async function runEvalTrialLifecycle(input: {
       agent,
       task,
       evaluatorAgent: input.config.evaluatorAgent,
+      sandboxProvider: input.config.sandbox.provider,
       evaluatorAgentExecutor: input.evaluatorAgentExecutor,
     });
     const { secretValues, ...persistedScoring } = scoring;
@@ -142,13 +144,14 @@ async function completeEvalTrialWithCodingAgent(input: {
   prompt: string;
   prepared: Awaited<ReturnType<typeof prepareEvalTrialWorktree>>;
   artifactRoot: string;
+  sandboxProvider: EvalSuiteConfig["sandbox"]["provider"];
   sandcastleExecutor?: (input: SandcastleExecutorInput) => Promise<SandcastleExecutorResult>;
 }) {
   const sandcastleInput = {
     evalTrialId: input.evalTrialId,
     providerName: requireString(input.agent.provider, "agent provider"),
     model: input.agent.model,
-    sandboxProvider: "docker",
+    sandboxProvider: input.sandboxProvider,
     branchStrategy: "head",
     prompt: input.prompt,
     worktreePath: input.prepared.repoPath,

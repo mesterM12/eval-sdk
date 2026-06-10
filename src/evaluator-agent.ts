@@ -2,7 +2,9 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { claudeCode, codex, copilot, cursor, opencode, pi, run } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
 import { redactText, type AcceptanceCheckResult } from "./acceptance-material-sandbox.js";
+import type { EvalSandboxProvider } from "./coding-agent-adapter.js";
 import type { EvalSuiteConfig } from "./eval-suite-config.js";
 
 type RubricConfig = EvalSuiteConfig["tasks"][number]["acceptanceMaterial"]["rubrics"][number];
@@ -20,6 +22,7 @@ export type EvaluatorAgentExecutorInput = {
   model?: string;
   prompt: string;
   scoringContextPath: string;
+  sandboxProvider: EvalSandboxProvider;
   readOnly: true;
   deterministicResults: AcceptanceCheckResult[];
   rubrics: RubricConfig[];
@@ -35,6 +38,7 @@ export async function runEvaluatorAgent(input: {
   deterministicResults: AcceptanceCheckResult[];
   rubrics: RubricConfig[];
   evaluatorAgent?: EvalSuiteConfig["evaluatorAgent"];
+  sandboxProvider: EvalSandboxProvider;
   executor?: (input: EvaluatorAgentExecutorInput) => Promise<EvaluatorAgentExecutorResult>;
   secretValues: string[];
 }): Promise<EvaluatorAgentScoringResult> {
@@ -51,6 +55,7 @@ export async function runEvaluatorAgent(input: {
       model,
       prompt: await buildEvaluatorAgentPrompt(input.suiteRoot, basePrompt, input.deterministicResults, input.rubrics),
       scoringContextPath: input.scoringRepoPath,
+      sandboxProvider: input.sandboxProvider,
       readOnly: true,
       deterministicResults: input.deterministicResults,
       rubrics: input.rubrics,
@@ -83,7 +88,7 @@ export function createSandcastleEvaluatorAgentExecutor(runtime: SandcastleRuntim
     const logPath = path.join(path.dirname(input.scoringContextPath), `${input.evalTrialId}-evaluator-sandcastle.log`);
     const result = await runtime.run({
       agent: providerFactory(input.model, { env: input.env }),
-      sandbox: runtime.docker({}),
+      sandbox: input.sandboxProvider === "local" ? runtime.noSandbox() : runtime.docker({}),
       cwd: input.scoringContextPath,
       prompt: input.prompt,
       logging: { type: "file", path: logPath },
@@ -250,12 +255,14 @@ function resolveSuitePath(suiteRoot: string, relativePath: string) {
 type SandcastleRuntime = {
   run: (options: unknown) => Promise<Record<string, unknown>>;
   docker: (options: unknown) => unknown;
+  noSandbox: (options?: unknown) => unknown;
   providers: Record<string, (model?: string, options?: { env?: Record<string, string> }) => unknown>;
 };
 
 const sandcastleRuntime: SandcastleRuntime = {
   run: run as unknown as SandcastleRuntime["run"],
   docker: docker as SandcastleRuntime["docker"],
+  noSandbox: noSandbox as SandcastleRuntime["noSandbox"],
   providers: {
     "claude-code": claudeCode as (model?: string, options?: { env?: Record<string, string> }) => unknown,
     codex: codex as (model?: string, options?: { env?: Record<string, string> }) => unknown,

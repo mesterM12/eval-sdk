@@ -8,9 +8,9 @@ Files: `src/eval-suite-config.ts`, consumed by `src/cli.ts`, `src/trial-matrix.t
 
 Interface: `loadEvalSuiteConfig(configPath, options)` returns a normalized `EvalSuiteConfig`, suite root, config path, and summary.
 
-Implementation: Parses YAML, validates provider support, path safety, duplicate ids, environment references, scoring weights, Acceptance Material references, Trial Matrix selectors, and pricing references, then normalizes optional values into predictable arrays and defaults.
+Implementation: Parses YAML, validates provider support, sandbox provider support, path safety, duplicate ids, environment references, scoring weights, Acceptance Material references, Trial Matrix selectors, and pricing references, then normalizes optional values into predictable arrays and defaults.
 
-Domain rules owned: Eval Suite config validity, Docker-only sandbox selection, Sandcastle built-in provider ids, safe relative paths, `env:` references, deterministic and rubric weight sum, and references from Trial Matrix selectors to agents, tasks, Scenario Variants, and run indexes.
+Domain rules owned: Eval Suite config validity, Docker or local sandbox selection, Sandcastle built-in provider ids, safe relative paths, `env:` references, deterministic and rubric weight sum, and references from Trial Matrix selectors to agents, tasks, Scenario Variants, and run indexes.
 
 Locality: Config rules stay in one module instead of leaking into command handling, Trial Matrix expansion, or Eval Trial orchestration.
 
@@ -88,15 +88,15 @@ Files: `src/coding-agent-adapter.ts`, composed by `src/eval-trial-lifecycle.ts`.
 
 Interface: `createSandcastleCodingAgentAdapter(runtime)` returns `completeEvalTrial(input)`. `createSandcastleBuiltInExecutor(runtime)` remains a compatibility seam for tests and existing callers.
 
-Implementation: Maps configured coding agent provider and model to Sandcastle built-ins, mounts the prepared agent home, runs in Docker with head branch strategy, reads logs, collects commits, captures provider metadata, preserves iteration usage, and asks git work for the diff.
+Implementation: Maps configured coding agent provider and model to Sandcastle built-ins, selects Docker or local Sandcastle execution, mounts the prepared agent home for Docker, runs with head branch strategy, reads logs, collects commits, captures provider metadata, preserves iteration usage, and asks git work for the diff.
 
-Domain rules owned: Coding agent provider mapping, Docker mount shape for agent runtime config, Sandcastle logging, branch strategy, result normalization, and handoff to git work for changed work.
+Domain rules owned: Coding agent provider mapping, Docker mount shape for agent runtime config, local host execution for login-authenticated CLIs, Sandcastle logging, branch strategy, result normalization, and handoff to git work for changed work.
 
 Locality: Sandcastle details stay behind the adapter interface instead of leaking into Eval Trial lifecycle code.
 
-Leverage: Fixture-based adapter tests can verify provider mapping, Docker options, logs, commits, diff, and usage metadata without executing a real coding agent.
+Leverage: Fixture-based adapter tests can verify provider mapping, sandbox selection, Docker options, logs, commits, diff, and usage metadata without executing a real coding agent.
 
-Depth guidance: Do not add custom command adapters or non-Docker sandbox execution here. One adapter is a hypothetical seam; add another only when product scope requires it.
+Depth guidance: Preserve `docs/adr/0003-local-sandbox-for-login-authenticated-agents.md`. Do not add custom command adapters when Sandcastle already provides the sandbox provider needed by product scope.
 
 ## Git Work
 

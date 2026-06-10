@@ -46,4 +46,17 @@ describe("git work filesystem seam", () => {
     expect(diff).toContain("committed change");
     expect(diff).toContain("modified");
   });
+
+  it("includes untracked files created by an Eval Trial in the collected diff", async () => {
+    const repoPath = await makeTempDir();
+    await writeFixtureFile(repoPath, "README.md", "starter\n");
+    const baseline = await ensureGitWorkBaseline({ repoPath });
+
+    await writeFixtureFile(repoPath, "hello.txt", "hello from local opencode\n");
+
+    const diff = await collectGitWorkDiff({ repoPath, baseSha: baseline.baseSha });
+
+    expect(diff).toContain("diff --git a/hello.txt b/hello.txt");
+    expect(diff).toContain("+hello from local opencode");
+  });
 });

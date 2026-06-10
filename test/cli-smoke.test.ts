@@ -259,7 +259,7 @@ report:
 
     expect(validate.exitCode).toBe(1);
     expect(validate.stderr).toContain("invalid eval suite:");
-    expect(validate.stderr).toContain("sandbox.provider must be docker");
+    expect(validate.stderr).toContain("sandbox.provider must be docker or local");
     expect(validate.stderr).toContain("duplicate agents id: dup");
     expect(validate.stderr).toContain("agent dup provider must be a Sandcastle built-in provider");
     expect(validate.stderr).toContain("agent dup env API_KEY must be an env var reference like env:API_KEY");

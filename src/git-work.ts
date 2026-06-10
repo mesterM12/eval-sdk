@@ -21,9 +21,11 @@ export async function ensureGitWorkBaseline(input: { repoPath: string }): Promis
 }
 
 export async function collectGitWorkDiff(input: { repoPath: string; baseSha: string }) {
+  await git(input.repoPath, ["add", "--intent-to-add", "."]);
   const committed = await gitStdout(input.repoPath, ["diff", `${input.baseSha}..HEAD`]);
+  const staged = await gitStdout(input.repoPath, ["diff", "--cached"]);
   const uncommitted = await gitStdout(input.repoPath, ["diff"]);
-  return [committed, uncommitted].filter((part) => part.length > 0).join("\n");
+  return [committed, staged, uncommitted].filter((part) => part.length > 0).join("\n");
 }
 
 async function git(repoPath: string, args: string[]) {

@@ -79,6 +79,48 @@ describe("Eval Suite config", () => {
     expect(suite.summary).toEqual({ tasks: 1, agents: 1, scenarioVariants: 1 });
   });
 
+  it("allows local host execution for suites that use locally authenticated coding agents", async () => {
+    const suiteRoot = await makeSuiteRoot();
+    await writeValidSuite(suiteRoot);
+    await writeFixtureFile(
+      suiteRoot,
+      "eval-suite.yaml",
+      `sandbox:
+  provider: local
+agents:
+  - id: claude
+    provider: claude-code
+    model: claude-opus-4-7
+evaluatorAgent:
+  id: evaluator
+  provider: opencode
+tasks:
+  - id: hello
+    prompt: prompts/task.md
+    starter: starter
+    scoring:
+      deterministicWeight: 0.7
+      rubricWeight: 0.3
+    acceptanceMaterial:
+      hiddenDir: acceptance/hidden
+      checks:
+        - id: smoke
+          command: npm test
+      rubrics:
+        - id: maintainability
+          path: rubrics/maintainability.md
+scenarioVariants:
+  - id: baseline
+matrix:
+  runIndexes: [1]
+`
+    );
+
+    const suite = await loadEvalSuiteConfig(path.join(suiteRoot, "eval-suite.yaml"));
+
+    expect(suite.config.sandbox).toEqual({ provider: "local" });
+  });
+
   it("reports config module errors for unsafe paths, selectors, pricing, weights, providers, env refs, duplicates, and Acceptance Material refs", async () => {
     const suiteRoot = await makeSuiteRoot();
     await writeValidSuite(
@@ -140,7 +182,7 @@ pricing:
     );
 
     await expect(loadEvalSuiteConfig(path.join(suiteRoot, "eval-suite.yaml"))).rejects.toThrowError(
-      /sandbox\.provider must be docker[\s\S]*duplicate agents id: dup[\s\S]*agent dup provider must be a Sandcastle built-in provider[\s\S]*agent dup env API_KEY must be an env var reference like env:API_KEY[\s\S]*task task prompt must be a relative path[\s\S]*task task starter must be a relative path[\s\S]*task task scoring deterministicWeight and rubricWeight must sum to 1[\s\S]*task task hidden acceptance material directory does not exist: missing-hidden[\s\S]*task task rubric maintainability does not exist: rubrics\/missing.md[\s\S]*matrix\.include\[0\]\.agent must reference an agent id: missing-agent[\s\S]*pricing bad-price inputPerMillion must be a positive number[\s\S]*pricing bad-price outputPerMillion must be a positive number[\s\S]*pricing bad-price must match a configured agent or evaluator agent provider\/model/
+      /sandbox\.provider must be docker or local[\s\S]*duplicate agents id: dup[\s\S]*agent dup provider must be a Sandcastle built-in provider[\s\S]*agent dup env API_KEY must be an env var reference like env:API_KEY[\s\S]*task task prompt must be a relative path[\s\S]*task task starter must be a relative path[\s\S]*task task scoring deterministicWeight and rubricWeight must sum to 1[\s\S]*task task hidden acceptance material directory does not exist: missing-hidden[\s\S]*task task rubric maintainability does not exist: rubrics\/missing.md[\s\S]*matrix\.include\[0\]\.agent must reference an agent id: missing-agent[\s\S]*pricing bad-price inputPerMillion must be a positive number[\s\S]*pricing bad-price outputPerMillion must be a positive number[\s\S]*pricing bad-price must match a configured agent or evaluator agent provider\/model/
     );
   });
 });

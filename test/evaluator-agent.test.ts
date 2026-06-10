@@ -55,6 +55,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [deterministicResult()],
       rubrics: [{ id: "quality", path: "rubrics/quality.md", weight: 2, scale: { min: 1, max: 5 } }],
       evaluatorAgent: { id: "evaluator", provider: "opencode", model: "judge-model", prompt: "prompts/evaluator.md" },
+      sandboxProvider: "docker",
       secretValues: [],
       executor: async (input) => {
         calls.push(input);
@@ -73,6 +74,7 @@ describe("Evaluator Agent module", () => {
       providerName: "opencode",
       model: "judge-model",
       scoringContextPath: path.join(suiteRoot, "repo"),
+      sandboxProvider: "docker",
       readOnly: true,
       deterministicResults: [expect.objectContaining({ id: "smoke", exitCode: 0 })],
       rubrics: [{ id: "quality", path: "rubrics/quality.md", weight: 2, scale: { min: 1, max: 5 } }],
@@ -93,6 +95,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [],
       rubrics: [],
       evaluatorAgent: undefined,
+      sandboxProvider: "docker",
       secretValues: [],
       executor: async () => {
         throw new Error("should not execute");
@@ -121,6 +124,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [deterministicResult()],
       rubrics: [{ id: "quality", path: "rubrics/quality.md", weight: 1, scale: { min: 1, max: 5 } }],
       evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
       secretValues: [],
       executor: async () => ({ stdout }),
     });
@@ -139,6 +143,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [],
       rubrics: [],
       evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
       secretValues: [],
       executor: async () => {
         throw new Error("adapter failed");
@@ -159,6 +164,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [],
       rubrics: [],
       evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
       secretValues: [],
       executor: async (input) => {
         await writeFixtureFile(input.scoringContextPath, "new-file.txt", "mutated\n");
@@ -181,6 +187,7 @@ describe("Evaluator Agent module", () => {
       deterministicResults: [],
       rubrics: [],
       evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
       secretValues: ["super-secret"],
       executor: async () => ({ stdout: '{"criteria":[],"summary":"super-secret"}', stderr: "stderr super-secret" }),
     });

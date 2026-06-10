@@ -35,13 +35,15 @@ npm install
 npm run build
 ```
 
-Start Docker and provide OpenCode credentials:
+For Docker-based eval trials, start Docker and provide OpenCode credentials:
 
 ```bash
 export OPENCODE_API_KEY=your-key
 ```
 
 The example uses `model: opencode/big-pickle`. Change the model in `examples/opencode-skills-and-plugins/eval-suite.yaml` if your OpenCode account uses a different model name.
+
+To use a locally authenticated OpenCode CLI instead, set `sandbox.provider: local` and omit `OPENCODE_API_KEY` from the agent `env`. Local execution uses Sandcastle `noSandbox()`, so the coding agent and evaluator agent run on the host and can use your existing OpenCode/OpenAI login state. This trades away Docker isolation.
 
 ## Build The Sandcastle Docker Image
 
@@ -190,7 +192,7 @@ matrix:
 ## Troubleshooting
 
 - `results run directory already exists`: choose a new `--results-dir`; result directories are immutable.
-- `sandbox.provider must be docker`: only Docker is supported in the first release.
+- `sandbox.provider must be docker or local`: use `docker` for isolated container execution, or `local` for host execution with local CLI login state.
 - `agent provider must be a Sandcastle built-in provider`: use one of `claude-code`, `pi`, `codex`, `opencode`, `cursor`, or `copilot`.
 - Docker errors during `run`: verify Docker is running and the current user can run containers.
-- OpenCode auth errors: verify `OPENCODE_API_KEY` is exported in the shell running the CLI.
+- OpenCode auth errors: for Docker, verify `OPENCODE_API_KEY` is exported in the shell running the CLI; for local execution, verify the host OpenCode CLI is logged in to OpenAI.

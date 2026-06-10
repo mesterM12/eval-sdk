@@ -117,6 +117,54 @@ describe("eval trial execution filesystem seam", () => {
     await expect(readFile(path.join(suiteRoot, "results", "test-run", "report.md"), "utf8")).resolves.toContain("# Eval Report");
   });
 
+  it("passes local sandbox provider to coding and evaluator agents", async () => {
+    const suiteRoot = await makeTempDir();
+    await writeFixtureFile(suiteRoot, "prompts/task.md", "# Task\n");
+    await writeFixtureFile(suiteRoot, "starter/README.md", "starter\n");
+    await writeFixtureFile(suiteRoot, "acceptance/hidden/pass.test.js", "console.log('ok')\n");
+    await writeFixtureFile(suiteRoot, "rubrics/quality.md", "# Quality\n");
+    const agentCalls: SandcastleExecutorInput[] = [];
+    const evaluatorCalls: EvaluatorAgentExecutorInput[] = [];
+
+    const results = await executeEvalTrials({
+      suiteRoot,
+      resultsRoot: path.join(suiteRoot, "results", "local-run"),
+      config: {
+        sandbox: { provider: "local" },
+        agents: [{ id: "claude", provider: "claude-code" }],
+        evaluatorAgent: { id: "eval", provider: "opencode" },
+        tasks: [
+          {
+            id: "task",
+            prompt: "prompts/task.md",
+            starter: "starter",
+            scoring: { deterministicWeight: 0.5, rubricWeight: 0.5 },
+            acceptanceMaterial: {
+              hiddenDir: "acceptance/hidden",
+              checks: [{ id: "pass", command: "node acceptance/hidden/pass.test.js" }],
+              rubrics: [{ id: "quality", path: "rubrics/quality.md" }],
+            },
+          },
+        ],
+        scenarioVariants: [{ id: "baseline" }],
+        matrix: { runIndexes: [1] },
+      },
+      sandcastleExecutor: async (input) => {
+        agentCalls.push(input);
+        await writeFixtureFile(input.worktreePath, "README.md", "changed\n");
+        return { stdout: "ok", commits: [], diff: "diff" };
+      },
+      evaluatorAgentExecutor: async (input) => {
+        evaluatorCalls.push(input);
+        return { stdout: JSON.stringify({ criteria: [{ id: "quality", score: 4, rationale: "Good." }], summary: "Good." }) };
+      },
+    });
+
+    expect(results[0]?.status).toBe("success");
+    expect(agentCalls).toEqual([expect.objectContaining({ sandboxProvider: "local", providerName: "claude-code" })]);
+    expect(evaluatorCalls).toEqual([expect.objectContaining({ sandboxProvider: "local", providerName: "opencode" })]);
+  });
+
   it("records failed eval trials without retries and only fail-fast stops later scheduling", async () => {
     const suiteRoot = await makeTempDir();
     await writeFixtureFile(suiteRoot, "prompts/task.md", "# Task\n");
@@ -562,6 +610,7 @@ console.error(` + "`stderr ${process.env.SECRET_TOKEN}`" + `);
         dockerCalls.push(options);
         return { name: "docker", tag: "bind-mount", env: {} };
       },
+      noSandbox: () => ({ name: "local" }),
       run: async (options: unknown) => {
         runCalls.push(options);
         await writeFixtureFile(worktreePath, "README.md", "after\n");

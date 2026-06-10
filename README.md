@@ -2,7 +2,7 @@
 
 TypeScript CLI for comparing coding agents against repeatable software tasks under controlled scenario variants.
 
-The CLI reads an `eval-suite.yaml`, expands a trial matrix, runs each eval trial through Sandcastle built-in coding agents in Docker, introduces hidden acceptance material only during post-trial scoring, and writes JSON/Markdown reports.
+The CLI reads an `eval-suite.yaml`, expands a trial matrix, runs each eval trial through Sandcastle built-in coding agents in Docker or locally, introduces hidden acceptance material only during post-trial scoring, and writes JSON/Markdown reports.
 
 ## Install
 
@@ -14,8 +14,8 @@ npm run build
 Runtime requirements for real eval trials:
 
 - Node.js 20+
-- Docker running locally
-- Credentials for the agent provider you configure, for example `OPENCODE_API_KEY` for OpenCode
+- Docker running locally when `sandbox.provider` is `docker`
+- Credentials for the agent provider you configure, either API keys such as `OPENCODE_API_KEY` or local CLI login state when `sandbox.provider` is `local`
 
 ## Commands
 
@@ -58,3 +58,7 @@ open examples/opencode-skills-and-plugins/.eval-agent/results/manual-run/report.
 ```
 
 See `docs/running-opencode-evals.md` for the full walkthrough and config reference.
+
+## Local Login Auth
+
+Use `sandbox.provider: local` to run coding agents and evaluator agents on the host with Sandcastle `noSandbox()`. This lets Claude Code and OpenCode use local login credentials instead of API keys, at the cost of Docker isolation.
