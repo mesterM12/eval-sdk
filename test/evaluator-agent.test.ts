@@ -176,6 +176,53 @@ describe("Evaluator Agent module", () => {
     expect(await exists(path.join(suiteRoot, "repo", "new-file.txt"))).toBe(true);
   });
 
+  it("records read-only scoring context content changes as Evaluator Agent failures", async () => {
+    const suiteRoot = await makeTempDir();
+    await writeFixtureFile(suiteRoot, "repo/solution.txt", "completed work\n");
+
+    const result = await runEvaluatorAgent({
+      suiteRoot,
+      evalTrialId: "agent__task__baseline__1",
+      scoringRepoPath: path.join(suiteRoot, "repo"),
+      deterministicResults: [],
+      rubrics: [],
+      evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
+      secretValues: [],
+      executor: async (input) => {
+        await writeFile(path.join(input.scoringContextPath, "solution.txt"), "changed work\n", "utf8");
+        return { stdout: JSON.stringify({ criteria: [], summary: "Done." }) };
+      },
+    });
+
+    expect(result).toEqual(expect.objectContaining({ status: "failed", error: expect.stringContaining("read-only scoring context") }));
+  });
+
+  it("extracts evaluator JSON from surrounding text while respecting braces inside strings", async () => {
+    const suiteRoot = await makeTempDir();
+    await writeFixtureFile(suiteRoot, "repo/solution.txt", "completed work\n");
+    await writeFixtureFile(suiteRoot, "rubrics/quality.md", "# Quality\n");
+
+    const result = await runEvaluatorAgent({
+      suiteRoot,
+      evalTrialId: "agent__task__baseline__1",
+      scoringRepoPath: path.join(suiteRoot, "repo"),
+      deterministicResults: [deterministicResult()],
+      rubrics: [{ id: "quality", path: "rubrics/quality.md", weight: 1, scale: { min: 1, max: 5 } }],
+      evaluatorAgent: { id: "evaluator", provider: "opencode" },
+      sandboxProvider: "docker",
+      secretValues: [],
+      executor: async () => ({
+        stdout: `Here is the JSON:\n${JSON.stringify({ criteria: [{ id: "quality", score: 5, rationale: 'Handles {braces} and escaped "quotes".' }], summary: "Great." })}\nThanks.`,
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: "success",
+      result: { criteria: [{ id: "quality", score: 5, rationale: 'Handles {braces} and escaped "quotes".' }], summary: "Great." },
+    });
+  });
+
   it("redacts secrets from successful Evaluator Agent stdout and stderr", async () => {
     const suiteRoot = await makeTempDir();
     await writeFixtureFile(suiteRoot, "repo/solution.txt", "completed work\n");

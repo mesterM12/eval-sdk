@@ -7,7 +7,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && vitest run test"
+    "test": "npm run build && vitest run test",
+    "coverage": "vitest run test --coverage"
   },
   "dependencies": {
     "@ai-hero/sandcastle": "^0.7.0",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
+    "@vitest/coverage-v8": "^4.1.8",
     "execa": "^9.6.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
